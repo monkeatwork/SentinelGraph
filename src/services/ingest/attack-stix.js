@@ -9,7 +9,8 @@
  */
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 
 const { getDb } = require('../../config/mongo');
 const { getDriver } = require('../../config/neo4j');
@@ -31,28 +32,37 @@ const TYPE_TO_LABEL = {
 
 const CVE_RE = /CVE-\d{4}-\d{4,7}/g;
 
+/**
+ * ATT&CK current data keeps the attack id (G0016, T1059, S0154, TA0001, M1036…)
+ * inside external_references with source_name 'mitre-attack'.
+ */
+function getMitreId(obj) {
+  if (obj.external_id) return obj.external_id;
+  const ref = (obj.external_references || []).find((r) => r.source_name === 'mitre-attack' && r.external_id);
+  return ref ? ref.external_id : null;
+}
+
+function getAliases(obj) {
+  if (obj.aliases) return obj.aliases;
+  if (obj.x_mitre_aliases) return obj.x_mitre_aliases;
+  return [];
+}
+
 function downloadBundle(destPath) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const url = 'https://github.com/mitre-attack/attack-stix-data/raw/master/enterprise-attack/enterprise-attack.json';
     console.log(`  downloading STIX bundle (~200 MB) from ${url}`);
-    const file = fs.createWriteStream(destPath);
-    const req = https.get(url, { headers: { 'User-Agent': 'SentinelGraph' }, timeout: 120000 }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        file.close();
-        console.log(`  redirect -> ${res.headers.location}`);
-        const r2 = https.get(res.headers.location, { headers: { 'User-Agent': 'SentinelGraph' }, timeout: 120000 }, (res2) => {
-          if (res2.statusCode !== 200) return reject(new Error(`download failed: HTTP ${res2.statusCode}`));
-          res2.pipe(file);
-          file.on('finish', () => file.close(() => resolve()));
-        });
-        r2.on('error', reject);
-        return;
-      }
-      if (res.statusCode !== 200) return reject(new Error(`download failed: HTTP ${res.statusCode}`));
-      res.pipe(file);
-      file.on('finish', () => file.close(() => resolve()));
-    });
-    req.on('error', reject);
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'SentinelGraph' },
+        redirect: 'follow',
+      });
+      if (!res.ok) return reject(new Error(`download failed: HTTP ${res.status}`));
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(destPath));
+      resolve();
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 
@@ -71,7 +81,7 @@ async function loadBundle() {
 function toEntityDoc(obj) {
   const label = TYPE_TO_LABEL[obj.type];
   if (!label) return null;
-  const mitreId = obj.external_id;
+  const mitreId = getMitreId(obj);
   if (!mitreId) return null;
   const externalRefs = (obj.external_references || [])
     .filter((r) => r.url || r.source_name)
@@ -80,7 +90,7 @@ function toEntityDoc(obj) {
     mitreId,
     entityType: label,
     name: obj.name || mitreId,
-    aliases: obj.x_mitre_aliases || [],
+    aliases: getAliases(obj),
     description: obj.description || '',
     externalRefs,
     neo4jSynced: true,
@@ -92,12 +102,11 @@ function toEntityDoc(obj) {
 function toNodeRow(obj) {
   const label = TYPE_TO_LABEL[obj.type];
   if (!label) return null;
-  const mitreId = obj.external_id;
+  const mitreId = getMitreId(obj);
   if (!mitreId) return null;
   const row = { label, mitreId, name: obj.name || mitreId };
-  if (obj.x_mitre_aliases) row.aliases = obj.x_mitre_aliases;
-  else row.aliases = [];
-  const platforms = obj.x_mitre_platforms || obj.operating_system_refs ? (obj.x_mitre_platforms || []) : [];
+  row.aliases = getAliases(obj);
+  const platforms = obj.x_mitre_platforms || [];
   switch (label) {
     case 'ThreatActor':
       row.firstSeen = obj.first_seen || null;
@@ -108,7 +117,7 @@ function toNodeRow(obj) {
       row.endDate = obj.last_seen || null;
       break;
     case 'Malware':
-      row.type = (obj.labels || [])[0] || null;
+      row.type = obj.is_family ? 'family' : null;
       row.platforms = platforms;
       break;
     case 'Technique':
@@ -173,6 +182,67 @@ async function ingestNeo4jNodes(rows, label) {
 }
 
 /**
+ * Derive EXPLOITS rows (malware/tool external CVE refs + curated anchors).
+ * Separate so the NVD phase can re-link them once Vulnerability nodes exist.
+ */
+function deriveExploits(bundle) {
+  const seen = new Set();
+  const out = [];
+  for (const obj of bundle.objects) {
+    if ((obj.type !== 'malware' && obj.type !== 'tool')) continue;
+    const malId = getMitreId(obj);
+    if (!malId) continue;
+    const cves = new Set();
+    for (const ref of obj.external_references || []) {
+      const hay = [ref.url, ref.description, ref.source_name].filter(Boolean).join(' ');
+      for (const m of hay.matchAll(CVE_RE)) cves.add(m[0].toUpperCase());
+    }
+    for (const cve of cves) {
+      const k = `${malId}|${cve}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push({ type: 'EXPLOITS', from: malId, to: cve });
+      }
+    }
+  }
+  for (const e of EXPLOITS_CURATED) {
+    const k = `${e.malwareId}|${e.cveId}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push({ type: 'EXPLOITS', from: e.malwareId, to: e.cveId });
+    }
+  }
+  return out;
+}
+
+/** Re-run after NVD ingestion so EXPLOITS edges land on real Vulnerability nodes. */
+async function linkExploits() {
+  const bundle = await loadBundle();
+  const rows = deriveExploits(bundle);
+  const driver = getDriver();
+  const session = driver.session();
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const chunk = rows.slice(i, i + BATCH);
+      await session.run(
+        `
+        UNWIND $rows AS row
+        MATCH (a:Malware {mitreId: row.from})
+        MATCH (b:Vulnerability {cveId: row.to})
+        MERGE (a)-[r:EXPLOITS]->(b)
+        RETURN count(*) AS c
+        `,
+        { rows: chunk }
+      );
+    }
+    const res = await session.run('MATCH ()-[r:EXPLOITS]->() RETURN count(r) AS c');
+    console.log(`  [neo4j] EXPLOITS edges after NVD link: ${res.records[0].get('c').toNumber()}`);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Derive relationship rows (from + to mitreIds) from STIX objects.
  */
 function deriveRelationships(bundle, objectsById, rowsByLabel) {
@@ -186,8 +256,8 @@ function deriveRelationships(bundle, objectsById, rowsByLabel) {
     const sl = TYPE_TO_LABEL[src.type];
     const tl = TYPE_TO_LABEL[dst.type];
     if (!sl || !tl) continue;
-    const sKey = src.external_id;
-    const tKey = dst.external_id;
+    const sKey = getMitreId(src);
+    const tKey = getMitreId(dst);
     if (!sKey || !tKey) continue;
     const rt = obj.relationship_type;
     if (rt === 'subtechnique-of' && sl === 'Technique' && tl === 'Technique') {
@@ -203,6 +273,7 @@ function deriveRelationships(bundle, objectsById, rowsByLabel) {
     } else if (rt === 'mitigates' && sl === 'Mitigation' && tl === 'Technique') {
       out.push({ type: 'MITIGATED_BY', from: tKey, to: sKey }); // (Technique)-[:MITIGATED_BY]->(Mitigation)
     }
+    // 'uses' from intrusion-set→malware, 'detects', 'revoked-by' fall outside the 10 relationship types.
   }
 
   // 2) BELONGS_TO derived from kill_chain_phases → tactic short name
@@ -211,41 +282,19 @@ function deriveRelationships(bundle, objectsById, rowsByLabel) {
     if (row.shortName) shortNameToTactic.set(row.shortName, row.mitreId);
   }
   for (const obj of bundle.objects) {
-    if (obj.type !== 'attack-pattern' || !obj.external_id) continue;
+    if (obj.type !== 'attack-pattern') continue;
+    const techId = getMitreId(obj);
+    if (!techId) continue;
     for (const kcp of obj.kill_chain_phases || []) {
       const tacticId = shortNameToTactic.get(kcp.phase_name);
       if (tacticId && kcp.kill_chain_name === 'mitre-attack') {
-        out.push({ type: 'BELONGS_TO', from: obj.external_id, to: tacticId });
+        out.push({ type: 'BELONGS_TO', from: techId, to: tacticId });
       }
     }
   }
 
-  // 3) EXPLOITS from malware/tool external_references containing CVE ids
-  const seenExploits = new Set();
-  for (const obj of bundle.objects) {
-    if ((obj.type !== 'malware' && obj.type !== 'tool') || !obj.external_id) continue;
-    const cves = new Set();
-    for (const ref of obj.external_references || []) {
-      const hay = [ref.url, ref.description, ref.source_name].filter(Boolean).join(' ');
-      for (const m of hay.matchAll(CVE_RE)) cves.add(m[0].toUpperCase());
-    }
-    for (const cve of cves) {
-      const k = `${obj.external_id}|${cve}`;
-      if (!seenExploits.has(k)) {
-        seenExploits.add(k);
-        out.push({ type: 'EXPLOITS', from: obj.external_id, to: cve });
-      }
-    }
-  }
-
-  // 4) curated EXPLOITS (guaranteed flagship anchors)
-  for (const e of EXPLOITS_CURATED) {
-    const k = `${e.malwareId}|${e.cveId}`;
-    if (!seenExploits.has(k)) {
-      seenExploits.add(k);
-      out.push({ type: 'EXPLOITS', from: e.malwareId, to: e.cveId });
-    }
-  }
+  // 3) EXPLOITS (may be re-linked by the NVD phase when Vulnerability nodes exist)
+  out.push(...deriveExploits(bundle));
 
   return out;
 }
@@ -316,7 +365,7 @@ async function linkTargets() {
 }
 
 async function ingestAttack() {
-  const bundle = await loadBundle();
+  let bundle = await loadBundle();
   const objects = bundle.objects || [];
   console.log(`  STIX objects in bundle: ${objects.length}`);
 
@@ -338,7 +387,6 @@ async function ingestAttack() {
     rowsByLabel[row.label].push(row);
     totalRows++;
   }
-  // split per label for the no-APOC fallback path
   const labelsOrder = Object.keys(rowsByLabel);
   for (const label of labelsOrder) {
     const rows = rowsByLabel[label];
@@ -355,6 +403,12 @@ async function ingestAttack() {
   for (const [type, n] of [...new Set(relRows.map((r) => r.type))].map((t) => [t, relRows.filter((r) => r.type === t).length])) {
     console.log(`    ${type}: ${n}`);
   }
+
+  // Release the raw STIX object graph — it is the single biggest heap consumer.
+  bundle.objects = null;
+  bundle = null;
+  objectsById.clear();
+  rowsByLabel.Tactic.length = 0;
   await ingestNeo4jRelationships(relRows);
   await linkTargets();
 
@@ -373,7 +427,7 @@ async function ingestAttack() {
   return { nodeRows: totalRows, relRows: relRows.length };
 }
 
-module.exports = { ingestAttack, linkTargets };
+module.exports = { ingestAttack, linkTargets, linkExploits, deriveExploits };
 
 if (require.main === module) {
   (async () => {

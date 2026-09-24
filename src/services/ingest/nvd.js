@@ -183,6 +183,10 @@ async function ingestNvd() {
       );
       console.log(`  [neo4j AFFECTS] batch ${i / BATCH + 1}/${Math.ceil(affRows.length / BATCH)}`);
     }
+
+    // --- Neo4j: EXPLOITS edges (malware → vulnerability) now that vuln nodes exist ---
+    const { linkExploits } = require('./attack-stix');
+    await linkExploits();
   } finally {
     await session.close();
   }

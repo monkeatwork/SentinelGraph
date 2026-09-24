@@ -2,14 +2,15 @@ services:
   neo4j:
     image: neo4j:5-community
     container_name: sentinelgraph-neo4j
+    mem_limit: 2g
     ports:
       - "7474:7474"   # HTTP browser
       - "7687:7687"   # Bolt
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-sentinelgraph}
-      NEO4J_server_memory_heap_initial__size: 512m
-      NEO4J_server_memory_heap_max__size: 1G
-      NEO4J_server_memory_pagecache_size: 512m
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
     volumes:
       - neo4j_data:/data
     healthcheck:
@@ -22,6 +23,8 @@ services:
   mongodb:
     image: mongo:7
     container_name: sentinelgraph-mongodb
+    mem_limit: 1.5g
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.75"]
     ports:
       - "27017:27017"
     volumes:
@@ -39,6 +42,7 @@ services:
     profiles: ["api"]
     build: .
     container_name: sentinelgraph-api
+    mem_limit: 512m
     ports:
       - "3000:3000"
     environment:
