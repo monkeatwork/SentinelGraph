@@ -80,10 +80,10 @@ async function ensureNeo4jIndexes() {
       await session.run(c);
     }
     await session.run(
-      "CREATE RANGE INDEX IF NOT EXISTS vulnerability_cvss FOR (n:Vulnerability) ON (n.cvssScore)"
+      "CREATE RANGE INDEX vulnerability_cvss IF NOT EXISTS FOR (n:Vulnerability) ON (n.cvssScore)"
     );
     await session.run(
-      "CREATE FULLTEXT INDEX IF NOT EXISTS entity_name_ft FOR (n:ThreatActor|Campaign|Malware|Technique|Tactic|Mitigation) ON EACH [n.name, n.aliases]"
+      "CREATE FULLTEXT INDEX entity_name_ft IF NOT EXISTS FOR (n:ThreatActor|Campaign|Malware|Technique|Tactic|Mitigation) ON EACH [n.name, n.aliases]"
     );
     console.log('  [neo4j] 9 uniqueness constraints + range + fulltext indexes ensured');
   } finally {
