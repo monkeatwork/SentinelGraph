@@ -29,14 +29,31 @@ A hybrid NoSQL system: **Neo4j** answers *how entities connect* (multi-hop trave
 
 ## Quick start
 
-Prereqs: Docker (Desktop or equivalent), Node 20+.
+Prereqs: Node 20+. Databases can run **either** natively (recommended for dev machines —
+cooler, no VM) **or** in Docker (recommended for lab/demo machines):
+
+**Option A — native databases (macOS, Homebrew):**
+```bash
+brew tap mongodb/brew
+brew install mongodb-community neo4j
+# Neo4j: set the password before first start
+/opt/homebrew/opt/neo4j/bin/neo4j-admin dbms set-initial-password sentinelgraph
+brew services start neo4j mongodb/brew/mongodb-community
+```
+
+**Option B — Docker (any machine):**
+```bash
+docker compose up -d            # neo4j (7474/7687) + mongodb (27017), memory-capped
+```
+> Never run both at once — they share ports 27017/7687/7474.
+
+Then, on any machine (one-time setup, all idempotent):
 
 ```bash
 git clone <repo-url> sentinelgraph && cd sentinelgraph
 
 cp .env.example .env            # adjust passwords/secret if you like
 npm install
-docker compose up -d            # neo4j (7474/7687) + mongodb (27017), memory-capped
 npm run ensure-indexes          # 9 unique constraints, range + fulltext indexes, Mongo indexes
 
 npm run ingest:attack           # MITRE ATT&CK STIX 2.1 → both stores (idempotent)
@@ -50,6 +67,10 @@ npm start                       # API + dashboard on http://localhost:3000
 npm run demo                    # the end-to-end Review 2 demo runner
 npm test                        # jest + supertest (DBs must be running)
 ```
+
+Stop the databases at the end of the day:
+`brew services stop neo4j mongodb/brew/mongodb-community` (native) or `docker compose down` (Docker).
+`docs/BEGINNERS_GUIDE.md` explains every command in plain language.
 
 Login: `admin@sentinelgraph.local` / `Admin@123` (admin), `analyst@vitstudent.ac.in` / `Analyst@123`.
 

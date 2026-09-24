@@ -120,9 +120,17 @@ From the rubric (3 marks UI/UX + analytics + docs; viva):
 
 ## 6 · How to run everything
 
+**Databases, two ways (never both at once — same ports):**
+
+| Mode | Start | Stop |
+|---|---|---|
+| **Native (this Mac — recommended, cooler)** | `brew services start neo4j mongodb/brew/mongodb-community` | `brew services stop neo4j mongodb/brew/mongodb-community` |
+| **Docker (lab machines / fallback)** | `docker compose up -d` | `docker compose down` |
+
+Both modes already hold a full dataset (native was re-ingested 25 Sep; Docker volumes are untouched).
+
 ```bash
 cd sentinelgraph
-docker compose up -d          # neo4j (7474/7687) + mongodb (27017) — memory-capped
 npm run ensure-indexes        # (already done; no-op on re-run)
 npm run ingest:attack         # STIX (cached bundle in data/, 51 MB)   [idempotent]
 npm run ingest:nvd            # NVD CVEs (cached in data/nvd-cves.json) [idempotent]
@@ -135,17 +143,21 @@ npm run demo                  # full automated Review 2 demo run
 npm test                      # 24 integration tests (DBs must be running)
 ```
 
-Neo4j browser: http://localhost:7474 (neo4j / sentinelgraph). Mongo shell: `docker exec -it sentinelgraph-mongodb mongosh sentinelgraph`.
+Neo4j browser: http://localhost:7474 (neo4j / sentinelgraph). Mongo shell: `mongosh sentinelgraph`.
+Every command is explained in plain language in `docs/BEGINNERS_GUIDE.md`.
 
 ---
 
 ## 7 · Infrastructure & gotchas (read before touching anything)
 
-- **Docker Desktop GUI may not open** (current machine quirk — the daemon/VM still runs
-  fine in the background; CLI `docker ps` / `docker compose` work). Use the CLI, not the GUI.
-- **Memory**: containers are capped (neo4j 2 GB — heap 512 MB/page cache 256 MB;
-  mongo 1.5 GB — WiredTiger 0.75 GB). Keep the caps — the machine froze once when Docker
-  was unbounded. Don't run ingestion and the demo at the same time as other heavy apps.
+- **Databases now run natively** on the dev Mac (`brew services`): Neo4j 2026.09 + MongoDB 8.3.11,
+  memory-capped (Neo4j heap 512 MB / page cache 256 MB; Mongo WiredTiger 0.75 GB). Docker is still
+  an option for lab machines (`docker compose up -d` — volumes intact). Never run both modes at once.
+- **Docker Desktop GUI may not open** on the dev machine (quirk left over from the memory incident) —
+  irrelevant now; the daemon/CLI work and native services don't need Docker at all.
+- **Services up while working, down when done** (`brew services stop …`) — saves battery/heat.
+- **Memory**: keep the caps (the machine froze once when MongoDB/Neo4j were unbounded). Don't run
+  ingestion and the demo at the same time as other heavy apps.
 - **Mongo-first, then Neo4j** for every dual write; re-running ingestion fixes any failed run.
 - **Community MongoDB has no Atlas Vector Search**: retrieval = service-layer cosine over the
   `entityIds`-indexed candidate set (plan's Option B). Embeddings: all-MiniLM-L6-v2 384-d via
@@ -166,7 +178,9 @@ Neo4j browser: http://localhost:7474 (neo4j / sentinelgraph). Mongo shell: `dock
 sentinelgraph/
 ├── docker-compose.yml · Dockerfile · .env.example · package.json
 ├── README.md                     # setup + architecture + API table
-├── docs/demo-notes.md            # the exact Review 2 demo script + recorded numbers
+├── docs/
+│   ├── BEGINNERS_GUIDE.md        # slow plain-language tutorial + glossary (for the team)
+│   └── demo-notes.md             # the exact Review 2 demo script + recorded numbers
 ├── AGENT_PLAN.md                 # (upstream plan; checkpoints 0–6, all verified)
 ├── src/
 │   ├── server.js                 # Express + static dashboard + /health
