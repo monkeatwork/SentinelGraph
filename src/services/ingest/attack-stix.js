@@ -48,6 +48,31 @@ function getAliases(obj) {
   return [];
 }
 
+/**
+ * Keep a STIX object only if it is not revoked and its attack id matches its
+ * type's id scheme. ATT&CK's current bundle still carries 224 legacy
+ * course-of-action objects with Txxxx ids (old-style mitigations that share a
+ * technique's id) + 157 revoked objects — both collide with the global unique
+ * mitreId join key and must be skipped so Mongo mirrors the graph 1:1.
+ */
+const ID_PREFIX = {
+  'intrusion-set': 'G',
+  campaign: 'C',
+  malware: 'S',
+  tool: 'S',
+  'attack-pattern': 'T',
+  'x-mitre-tactic': 'TA',
+  'course-of-action': 'M',
+};
+
+function isKeepable(obj) {
+  if (obj.revoked) return false;
+  const prefix = ID_PREFIX[obj.type];
+  if (!prefix) return false;
+  const id = getMitreId(obj);
+  return Boolean(id && id.startsWith(prefix));
+}
+
 function downloadBundle(destPath) {
   return new Promise(async (resolve, reject) => {
     const url = 'https://github.com/mitre-attack/attack-stix-data/raw/master/enterprise-attack/enterprise-attack.json';
@@ -80,7 +105,7 @@ async function loadBundle() {
 /** Convert a STIX object into a Mongo `entities` document (or null). */
 function toEntityDoc(obj) {
   const label = TYPE_TO_LABEL[obj.type];
-  if (!label) return null;
+  if (!label || !isKeepable(obj)) return null;
   const mitreId = getMitreId(obj);
   if (!mitreId) return null;
   const externalRefs = (obj.external_references || [])
@@ -101,7 +126,7 @@ function toEntityDoc(obj) {
 /** Map a STIX object to its Neo4j node property row. */
 function toNodeRow(obj) {
   const label = TYPE_TO_LABEL[obj.type];
-  if (!label) return null;
+  if (!label || !isKeepable(obj)) return null;
   const mitreId = getMitreId(obj);
   if (!mitreId) return null;
   const row = { label, mitreId, name: obj.name || mitreId };
