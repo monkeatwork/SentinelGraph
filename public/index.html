@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SentinelGraph — CTI dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="login-view" class="center-card">
+    <div class="card">
+      <h1>🔭 SentinelGraph</h1>
+      <p class="sub">Graph-Augmented Retrieval for Cyber Threat Intelligence</p>
+      <form id="login-form">
+        <label>Email <input type="email" id="login-email" required value="analyst@vitstudent.ac.in" /></label>
+        <label>Password <input type="password" id="login-password" required value="Analyst@123" /></label>
+        <button type="submit" class="primary">Sign in</button>
+        <p class="hint">admin@sentinelgraph.local / Admin@123 · analyst@vitstudent.ac.in / Analyst@123</p>
+        <p id="login-error" class="error"></p>
+      </form>
+    </div>
+  </div>
+
+  <div id="app-view" hidden>
+    <header>
+      <div class="brand">🔭 SentinelGraph</div>
+      <nav>
+        <button data-tab="graph" class="tab active">Graph</button>
+        <button data-tab="ask" class="tab">Ask</button>
+        <button data-tab="reports" class="tab">Reports</button>
+      </nav>
+      <div class="user-box">
+        <span id="user-role" class="pill"></span>
+        <button id="logout" class="ghost">Log out</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="tab-graph" class="tab-panel active">
+        <div class="toolbar">
+          <input id="graph-search" placeholder="Find entity… e.g. APT29, Log4j, T1566" />
+          <button id="graph-search-btn" class="primary">Search</button>
+          <select id="graph-label-filter">
+            <option value="">All labels</option>
+            <option>ThreatActor</option><option>Campaign</option><option>Malware</option>
+            <option>Technique</option><option>Tactic</option><option>Mitigation</option>
+            <option>Vulnerability</option><option>Software</option><option>Sector</option>
+          </select>
+          <button id="graph-reset" class="ghost">Reset</button>
+          <span class="hint" id="graph-status"></span>
+        </div>
+        <div class="legend">
+          <span class="lg lg-ThreatActor">ThreatActor</span><span class="lg lg-Campaign">Campaign</span>
+          <span class="lg lg-Malware">Malware</span><span class="lg lg-Technique">Technique</span>
+          <span class="lg lg-Tactic">Tactic</span><span class="lg lg-Mitigation">Mitigation</span>
+          <span class="lg lg-Vulnerability">Vulnerability</span><span class="lg lg-Software">Software</span>
+          <span class="lg lg-Sector">Sector</span>
+        </div>
+        <div id="graph-canvas-wrap"><canvas id="graph-canvas"></canvas></div>
+        <div id="node-detail" class="node-detail" hidden></div>
+      </section>
+
+      <section id="tab-ask" class="tab-panel">
+        <div class="ask-box">
+          <textarea id="ask-input" rows="2" placeholder="Ask a question… e.g. Which adversary groups exploit Log4j, and how?">Which adversary groups exploit Log4j, and how?</textarea>
+          <button id="ask-btn" class="primary">Ask</button>
+          <select id="ask-depth"><option value="1">depth 1</option><option value="2" selected>depth 2</option><option value="3">depth 3</option></select>
+        </div>
+        <div id="ask-latency" class="hint"></div>
+        <div id="ask-result"></div>
+      </section>
+
+      <section id="tab-reports" class="tab-panel">
+        <div class="charts-row">
+          <div class="chart-card">
+            <h3>CVE severity by month</h3>
+            <canvas id="chart-sev-month" height="260"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>Most-cited sources</h3>
+            <canvas id="chart-sources" height="260"></canvas>
+          </div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-card">
+            <h3>Severity × known-exploited cross-tab</h3>
+            <canvas id="chart-crosstab" height="220"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>Chunks per entity (top)</h3>
+            <div id="chunks-entity-list" class="list"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

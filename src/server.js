@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const mongo = require('./config/mongo');
 const neo4j = require('./config/neo4j');
@@ -9,6 +10,9 @@ const neo4j = require('./config/neo4j');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
+
+// Dashboard (Phase 6) — plain HTML/JS served from ./public
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // --- Health ---------------------------------------------------------------
 app.get('/health', async (req, res) => {
