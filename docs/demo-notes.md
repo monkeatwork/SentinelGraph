@@ -123,8 +123,11 @@ retrieval's candidate scan is bounded by the multikey `chunks.entityIds` index.
 | Metric | Value |
 |---|---|
 | Graph nodes / rels | 25,096 / 63,534 |
-| Mongo docs | entities 1,835 · vulnerabilities 4,007 · reports ≈4,000 · chunks ≈4,000 |
-| 2-hop traversal | `< 100 ms` |
-| Vector top-10 | `< 100 ms` |
-| Aggregations | all `< 1 s` |
-| Shortest path log4j→APT29 | found, 3–5 hops |
+| Mongo docs | entities 1,835 · vulnerabilities 4,007 · reports 3,833 · chunks 3,856 |
+| Q&A resolve / graph / vector / total | 50 ms / 45 ms / 9 ms / ~80–106 ms |
+| 2-hop traversal | graph 79 ms (NFR1 < 500 ms ✓) |
+| Vector top-10 | 7–9 ms steady-state (NFR2 < 300 ms ✓) |
+| Aggregations | all 2–10 ms (well < 1 s) |
+| Shortest path log4j→APT29 | 4 hops (AFFECTS→EXPLOITS→USES_TECHNIQUE→PERFORMS), 2–6 ms |
+| Technique criticality #1 | Ingress Tool Transfer (T1105, 491) |
+| Most similar to APT29 | APT28 (J=0.22) |

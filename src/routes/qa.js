@@ -40,7 +40,9 @@ async function traverse(resolved, depth) {
       for (const rec of r.records) rows.push({
         label: rec.get('label'),
         key: rec.get('key'),
-        name: rec.get('name'),
+        name: rec.get('name') ||
+          (rec.get('label') === 'Software' ? rec.get('key') : null) ||
+          (rec.get('label') === 'Vulnerability' ? rec.get('key') : null),
       });
     }
     // de-dupe

@@ -25,7 +25,7 @@ async function vectorSearch({ entityIds = [], query, topK = 10 }) {
 
   const [qvec, candidates] = await Promise.all([
     embedTexts([query]),
-    db.collection('chunks').find(filter).limit(2000).toArray(),
+    db.collection('chunks').find(filter).limit(300).toArray(),
   ]);
 
   const q = qvec[0];

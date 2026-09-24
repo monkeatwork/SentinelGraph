@@ -42,7 +42,7 @@ function pathRows(records) {
   return (path || []).map((n) => ({
     label: (n.labels && n.labels[0]) || null,
     key: n.properties.mitreId || n.properties.cveId || n.properties.cpeName || n.properties.sectorName,
-    name: n.properties.name || n.properties.product || n.properties.sectorName || null,
+    name: n.properties.name || n.properties.product || n.properties.sectorName || n.properties.mitreId || n.properties.cveId || null,
   }));
 }
 

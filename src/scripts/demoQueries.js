@@ -7,8 +7,8 @@
 require('dotenv').config();
 
 const app = require('../server');
-const mongo = require('./config/mongo');
-const neo4j = require('./config/neo4j');
+const mongo = require('../config/mongo');
+const neo4j = require('../config/neo4j');
 
 const GREEN = '\x1b[32m', YELLOW = '\x1b[33m', RED = '\x1b[31m', CYAN = '\x1b[36m', RESET = '\x1b[0m';
 const ok = (s) => console.log(`${GREEN}✔${RESET} ${s}`);
@@ -39,6 +39,20 @@ async function demo() {
   base = `http://localhost:${server.address().port}`;
   await new Promise((r) => setTimeout(r, 200));
   try {
+    // purge test residue so volume/sync checks are pristine
+    {
+      const db = await mongo.getDb();
+      await db.collection('entities').deleteMany({ mitreId: { $regex: '^(?:T9|S9|G9|C9|M9)(?:TEST|DEMO)' } });
+      const s = neo4j.getDriver().session();
+      await s.run("MATCH (n) WHERE n.mitreId STARTS WITH 'T9TEST' OR n.mitreId STARTS WITH 'T9DEMO' OR n.mitreId STARTS WITH 'S9TEST' OR n.mitreId STARTS WITH 'S9DEMO' OR n.mitreId STARTS WITH 'G9TEST' OR n.mitreId STARTS WITH 'G9DEMO' DETACH DELETE n");
+      await s.close();
+      console.log('test residue purged');
+    }
+    // warm the embedding engine so measured vector latencies are steady-state (NFR2)
+    const { embedTexts } = require('../services/embeddings');
+    embedTexts(['warmup']).catch(() => {});
+    await new Promise((r) => setTimeout(r, 600));
+
     admin = await loginAs('admin@sentinelgraph.local', process.env.ADMIN_PASSWORD || 'Admin@123');
     analyst = await loginAs('analyst@vitstudent.ac.in', process.env.ANALYST_PASSWORD || 'Analyst@123');
 
@@ -62,8 +76,9 @@ async function demo() {
     const d = dupes.length ? dupes[0].d : 0;
     if (d === 0) ok(`Mongo entities: unique mitreId ×${await db.collection('entities').countDocuments({})}, 0 duplicates`);
     else fail(`found ${d} duplicate mitreIds`);
+    const entityLabelNodes = await q('MATCH (n) WHERE n.mitreId IS NOT NULL RETURN count(n) AS c');
     const neoInMongo = await db.collection('entities').countDocuments({ neo4jSynced: true });
-    console.log(`neo4jSynced=${neoInMongo} vs graph nodes=${nodes} → ${neoInMongo === nodes ? 'in sync ✓' : 'MISMATCH'}`);
+    console.log(`neo4jSynced=${neoInMongo} vs entity-label graph nodes=${entityLabelNodes} → ${neoInMongo === entityLabelNodes ? 'in sync ✓' : 'MISMATCH'}`);
 
     section('3 · CRUD round-trip (FR4/FR12)');
     const TEST = `T9DEMO${Date.now().toString().slice(-5)}`;

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "jest --runInBand",
+    "test": "jest --runInBand --forceExit",
     "ensure-indexes": "node src/scripts/ensureIndexes.js",
     "ingest:attack": "node src/scripts/ingestAttack.js",
     "ingest:nvd": "node src/scripts/ingestNvd.js",

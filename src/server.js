@@ -42,6 +42,12 @@ try {
 }
 
 const PORT = process.env.PORT || 3000;
+
+// Warm the embedding engine at boot so the first /api/qa/ask isn't paying
+// model-load/ONNX-init time inside the measured vector-search latency (NFR2).
+const { embedTexts } = require('./services/embeddings');
+embedTexts(['warmup']).catch(() => {});
+
 if (require.main === module) {
   app.listen(PORT, () => console.log(`✅ SentinelGraph API listening on http://localhost:${PORT}`));
 }
