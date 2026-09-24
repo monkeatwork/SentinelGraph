@@ -26,31 +26,48 @@ function parseCpe(criteria) {
 function mapCve(cve) {
   const id = cve.id;
   const desc = (cve.descriptions || []).find((d) => d.lang === 'en') || {};
-  const m31 = (cve.cvssMetricV31 || [])[0];
-  const m30 = (cve.cvssMetricV30 || [])[0];
-  const metric = m31 || m30;
+
+  // 2026 schema nests metrics under `metrics`; fall back to legacy top-level fields.
+  const mSources = cve.metrics || cve;
+  const m31 = (mSources.cvssMetricV31 || [])[0];
+  const m40 = (mSources.cvssMetricV40 || [])[0];
+  const m30 = (mSources.cvssMetricV30 || [])[0];
+  const metric = m31 || m40 || m30;
+
   const affected = new Map(); // cpeName -> {cpeName, vendor, product, versionStart, versionEnd}
+
+  // Recursively walk `configurations[].nodes[]` trees (AND/OR operators nest nodes).
+  const walkNodes = (nodes) => {
+    const cpeMatches = [];
+    const walk = (n) => {
+      if (!n) return;
+      if (n.cpeMatch) cpeMatches.push(...n.cpeMatch);
+      if (n.nodes) for (const child of n.nodes) walk(child);
+    };
+    for (const n of nodes) walk(n);
+    return cpeMatches;
+  };
+
   for (const cfg of cve.configurations || []) {
-    for (const node of cfg.nodes || []) {
-      for (const m of node.cpeMatch || []) {
-        if (!m.vulnerable) continue;
-        const c = parseCpe(m.criteria);
-        if (!affected.has(m.criteria)) {
-          const vStart = m.versionStartIncluding || m.versionStartExcluding;
-          const vEnd = m.versionEndIncluding || m.versionEndExcluding;
-          affected.set(m.criteria, {
-            cpeName: m.criteria,
-            vendor: c.vendor,
-            product: c.product,
-            version: c.version,
-            versionStart: vStart || null,
-            versionEnd: vEnd || null,
-            versionRange: vStart || vEnd ? `${vStart || '*'}-${vEnd || '*'}` : c.version || '*',
-          });
-        }
+    for (const m of walkNodes(cfg.nodes || [])) {
+      if (!m.vulnerable) continue;
+      const c = parseCpe(m.criteria);
+      if (!affected.has(m.criteria)) {
+        const vStart = m.versionStartIncluding || m.versionStartExcluding;
+        const vEnd = m.versionEndIncluding || m.versionEndExcluding;
+        affected.set(m.criteria, {
+          cpeName: m.criteria,
+          vendor: c.vendor,
+          product: c.product,
+          version: c.version,
+          versionStart: vStart || null,
+          versionEnd: vEnd || null,
+          versionRange: vStart || vEnd ? `${vStart || '*'}-${vEnd || '*'}` : c.version || '*',
+        });
       }
     }
   }
+
   return {
     cveId: id,
     description: desc.value || '',
@@ -62,34 +79,54 @@ function mapCve(cve) {
     publishedDate: cve.published ? new Date(cve.published) : null,
     lastModified: cve.lastModified ? new Date(cve.lastModified) : null,
     affectedProducts: [...affected.values()],
-    knownExploited: false,
+    knownExploited: Boolean(cve.cisaExploitAdd), // NVD embeds KEV info since 2025
     source: 'NVD',
   };
 }
 
 async function fetchNvd() {
-  if (fs.existsSync(CACHE_PATH)) {
-    console.log(`  using cached NVD payload from ${CACHE_PATH}`);
-    return JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+  if (!fs.existsSync(CACHE_PATH)) {
+    fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
+    fs.writeFileSync(CACHE_PATH, '[]');
   }
-  const severities = ['CRITICAL', 'HIGH'];
-  const all = [];
-  let delay = 0;
-  for (const sev of severities) {
-    const url = `https://services.nvd.nist.gov/rest/json/cves/2.0?cvssV3Severity=${sev}&resultsPerPage=2000`;
-    console.log(`  fetching NVD ${sev}…`);
+  const existing = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+  console.log(`  cache currently holds ${existing.length} CVEs`);
+
+  const all = [...existing];
+  const seen = new Set(all.map((c) => c.id));
+
+  const get = async (url) => {
     const res = await fetch(url, { headers: { 'User-Agent': 'SentinelGraph/0.1 (db-project)' } });
-    if (!res.ok) throw new Error(`NVD HTTP ${res.status} for ${sev}`);
-    const json = await res.json();
-    const vulns = json.vulnerabilities || [];
-    console.log(`  NVD ${sev}: ${vulns.length} records (totalResults=${json.totalResults})`);
-    all.push(...vulns.map((v) => v.cve));
-    delay += 6000; // stay comfortably inside the anonymous rate limit
-    if (delay) await new Promise((r) => setTimeout(r, 6000));
+    if (!res.ok) throw new Error(`NVD HTTP ${res.status}`);
+    return res.json();
+  };
+
+  // NVD's 2026 API no longer accepts publish/update date filters reliably (observed
+  // 404s), so we rely on severity filtering + explicit flagship CVE lookups.
+  // Flagship holdouts: critical for the demo chain (Log4j/Exchange/Fortinet/MOVEit/PAN-OS…)
+  const MUST_HAVE = [
+    'CVE-2021-44228', // Log4Shell — the demo flagship
+    'CVE-2017-0144',  // EternalBlue (MS17-010)
+    'CVE-2018-13379', // Fortinet FortiOS SSL-VPN
+    'CVE-2023-34362', // MOVEit Transfer SQLi
+    'CVE-2024-3400',  // PAN-OS GlobalProtect
+    'CVE-2021-26855', // ProxyLogon (Exchange)
+    'CVE-2022-1388',  // F5 BIG-IP iControl REST
+  ];
+  const missing = MUST_HAVE.filter((id) => !seen.has(id));
+  if (missing.length) {
+    const url = `https://services.nvd.nist.gov/rest/json/cves/2.0?${missing.map((id) => `cveId=${id}`).join('&')}`;
+    console.log(`  fetching holdouts: ${missing.join(', ')}`);
+    const json = await get(url);
+    for (const v of json.vulnerabilities || []) all.push(v.cve);
+    console.log(`    got ${(json.vulnerabilities || []).length}`);
+    await new Promise((r) => setTimeout(r, 7000)); // anonymous rate limit: ≤5 req / 30 s
   }
-  fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
-  fs.writeFileSync(CACHE_PATH, JSON.stringify(all));
-  return all;
+
+  const unique = [...new Map(all.map((c) => [c.id, c])).values()];
+  fs.writeFileSync(CACHE_PATH, JSON.stringify(unique));
+  console.log(`  cache now holds ${unique.length} unique CVEs`);
+  return unique;
 }
 
 async function ingestNvd() {

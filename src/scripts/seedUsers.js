@@ -3,7 +3,7 @@
  * bcrypt cost 12 (NFR4). Idempotent (upsert).
  */
 require('dotenv').config();
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 
 const { getDb, close } = require('../config/mongo');
 

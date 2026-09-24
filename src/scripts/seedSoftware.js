@@ -2,7 +2,7 @@
  * Phase 3 — Seed ~200 Software nodes, 20 Sector nodes, and link ThreatActor→Sector (TARGETS).
  * Also links the curated flagship AFFECTS edges. Idempotent (MERGE).
  */
-const { getDriver } = require('../../config/neo4j');
+const { getDriver } = require('../config/neo4j');
 const { linkTargets } = require('../services/ingest/attack-stix');
 
 // vendor/product lists — commonly attacked software (hand-curated, per plan)
