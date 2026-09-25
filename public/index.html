@@ -6,47 +6,66 @@
   <title>SentinelGraph — CTI dashboard</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body>
-  <div id="login-view" class="center-card">
-    <div class="card">
-      <h1>🔭 SentinelGraph</h1>
-      <p class="sub">Graph-Augmented Retrieval for Cyber Threat Intelligence</p>
-      <form id="login-form">
-        <label>Email <input type="email" id="login-email" required value="analyst@vitstudent.ac.in" /></label>
-        <label>Password <input type="password" id="login-password" required value="Analyst@123" /></label>
-        <button type="submit" class="primary">Sign in</button>
-        <p class="hint">admin@sentinelgraph.local / Admin@123 · analyst@vitstudent.ac.in / Analyst@123</p>
-        <p id="login-error" class="error"></p>
-      </form>
+<body data-theme="light">
+  <!-- ============ LOGIN PAGE ============ -->
+  <section id="page-login" class="page login-page">
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="login-brand">
+          <div class="brand-mark">🔭</div>
+          <h1>SentinelGraph</h1>
+          <p class="sub">Graph-augmented retrieval for<br/>cyber threat intelligence</p>
+        </div>
+        <form id="login-form">
+          <label class="field">
+            <span>Email</span>
+            <input type="email" id="login-email" required value="analyst@vitstudent.ac.in" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input type="password" id="login-password" required value="Analyst@123" autocomplete="current-password" />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+          <p id="login-error" class="error" role="alert"></p>
+        </form>
+        <div class="demo-creds">
+          <span class="hint">Demo accounts</span>
+          <button class="chip" data-email="analyst@vitstudent.ac.in" data-pass="Analyst@123">analyst@vitstudent.ac.in</button>
+          <button class="chip" data-email="admin@sentinelgraph.local" data-pass="Admin@123">admin@sentinelgraph.local</button>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div id="app-view" hidden>
-    <header>
+  <!-- ============ APP ============ -->
+  <div id="page-app" hidden>
+    <header class="app-header">
       <div class="brand">🔭 SentinelGraph</div>
-      <nav>
-        <button data-tab="graph" class="tab active">Graph</button>
-        <button data-tab="ask" class="tab">Ask</button>
-        <button data-tab="reports" class="tab">Reports</button>
+      <nav class="app-nav">
+        <a href="#/graph" data-nav="graph" class="nav-link">Graph</a>
+        <a href="#/ask" data-nav="ask" class="nav-link">Ask</a>
+        <a href="#/reports" data-nav="reports" class="nav-link">Reports</a>
       </nav>
       <div class="user-box">
+        <button id="theme-toggle" class="icon-btn" title="Toggle light/dark mode" aria-label="Toggle theme">🌓</button>
         <span id="user-role" class="pill"></span>
-        <button id="logout" class="ghost">Log out</button>
+        <button id="logout" class="btn btn-ghost btn-sm">Log out</button>
       </div>
     </header>
 
-    <main>
-      <section id="tab-graph" class="tab-panel active">
+    <main class="app-main">
+      <!-- GRAPH PAGE -->
+      <section id="page-graph" class="view">
         <div class="toolbar">
-          <input id="graph-search" placeholder="Find entity… e.g. APT29, Log4j, T1566" />
-          <button id="graph-search-btn" class="primary">Search</button>
-          <select id="graph-label-filter">
+          <input id="graph-search" class="search-input" placeholder="Find entity… e.g. APT29, Log4j, T1566" />
+          <button id="graph-search-btn" class="btn btn-primary">Search</button>
+          <select id="graph-label-filter" class="select">
             <option value="">All labels</option>
             <option>ThreatActor</option><option>Campaign</option><option>Malware</option>
             <option>Technique</option><option>Tactic</option><option>Mitigation</option>
             <option>Vulnerability</option><option>Software</option><option>Sector</option>
           </select>
-          <button id="graph-reset" class="ghost">Reset</button>
+          <button id="graph-reset" class="btn btn-ghost">Reset</button>
           <span class="hint" id="graph-status"></span>
         </div>
         <div class="legend">
@@ -55,38 +74,57 @@
           <span class="lg lg-Tactic">Tactic</span><span class="lg lg-Mitigation">Mitigation</span>
           <span class="lg lg-Vulnerability">Vulnerability</span><span class="lg lg-Software">Software</span>
           <span class="lg lg-Sector">Sector</span>
+          <span class="hint" id="graph-count-hint"></span>
         </div>
-        <div id="graph-canvas-wrap"><canvas id="graph-canvas"></canvas></div>
+        <div id="graph-canvas-wrap" class="panel graph-wrap">
+          <canvas id="graph-canvas"></canvas>
+          <div id="graph-empty" class="empty-state">
+            <div class="empty-icon">🕸️</div>
+            <p>Search for an entity to start exploring the threat graph.</p>
+            <p class="hint">Try <b>APT29</b> or <b>Log4j</b></p>
+          </div>
+        </div>
         <div id="node-detail" class="node-detail" hidden></div>
       </section>
 
-      <section id="tab-ask" class="tab-panel">
-        <div class="ask-box">
-          <textarea id="ask-input" rows="2" placeholder="Ask a question… e.g. Which adversary groups exploit Log4j, and how?">Which adversary groups exploit Log4j, and how?</textarea>
-          <button id="ask-btn" class="primary">Ask</button>
-          <select id="ask-depth"><option value="1">depth 1</option><option value="2" selected>depth 2</option><option value="3">depth 3</option></select>
+      <!-- ASK PAGE -->
+      <section id="page-ask" class="view">
+        <div class="ask-box panel">
+          <textarea id="ask-input" rows="2" placeholder="Ask a question — e.g. Which adversary groups exploit Log4j, and how?">Which adversary groups exploit Log4j, and how?</textarea>
+          <div class="ask-actions">
+            <select id="ask-depth" class="select">
+              <option value="1">depth 1</option>
+              <option value="2" selected>depth 2</option>
+              <option value="3">depth 3</option>
+            </select>
+            <button id="ask-btn" class="btn btn-primary">Ask</button>
+          </div>
         </div>
         <div id="ask-latency" class="hint"></div>
-        <div id="ask-result"></div>
-      </section>
-
-      <section id="tab-reports" class="tab-panel">
-        <div class="charts-row">
-          <div class="chart-card">
-            <h3>CVE severity by month</h3>
-            <canvas id="chart-sev-month" height="260"></canvas>
-          </div>
-          <div class="chart-card">
-            <h3>Most-cited sources</h3>
-            <canvas id="chart-sources" height="260"></canvas>
+        <div id="ask-result" class="panel ask-result hidden">
+          <div id="ask-empty" class="empty-state">
+            <div class="empty-icon">❓</div>
+            <p>Ask a question and get a cited answer built from the graph + evidence reports.</p>
           </div>
         </div>
-        <div class="charts-row">
-          <div class="chart-card">
-            <h3>Severity × known-exploited cross-tab</h3>
-            <canvas id="chart-crosstab" height="220"></canvas>
+      </section>
+
+      <!-- REPORTS PAGE -->
+      <section id="page-reports" class="view">
+        <div class="charts-grid">
+          <div class="chart-card panel">
+            <h3>CVE severity by month</h3>
+            <canvas id="chart-sev-month"></canvas>
           </div>
-          <div class="chart-card">
+          <div class="chart-card panel">
+            <h3>Most-cited sources</h3>
+            <canvas id="chart-sources"></canvas>
+          </div>
+          <div class="chart-card panel">
+            <h3>Severity × known-exploited</h3>
+            <canvas id="chart-crosstab"></canvas>
+          </div>
+          <div class="chart-card panel">
             <h3>Chunks per entity (top)</h3>
             <div id="chunks-entity-list" class="list"></div>
           </div>
@@ -97,12 +135,12 @@
 
   <script src="/app.js"></script>
   <script>
-    // Watchdog: if app.js failed to load/start (e.g. cached copy, blocked script),
-    // the Sign in button would silently do nothing — surface that instead.
+    // Watchdog: if app.js failed to load or start, the Sign in button would
+    // silently do nothing — surface that instead.
     setTimeout(function () {
       if (!window.__sg_login_ready) {
         var el = document.getElementById('login-error');
-        if (el) el.textContent = 'Dashboard script did not start. Hard-refresh with Cmd+Shift+R. If it persists, open the console (Cmd+Option+J) and send me the red error line.';
+        if (el) el.textContent = 'Dashboard script did not start. Hard-refresh with Cmd+Shift+R. If it persists, open the console (Cmd+Option+J) and send the red error line to the dev.';
       }
     }, 1500);
   </script>
