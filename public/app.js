@@ -12,8 +12,18 @@ const state = {
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const res = await fetch(path, { ...opts, headers });
-  if (res.status === 401) { logout(); throw new Error('Session expired — log in again'); }
+  let res;
+  try {
+    res = await fetch(path, { ...opts, headers });
+  } catch (e) {
+    throw new Error(`Cannot reach the server (${e.message}). Is 'npm start' still running?`);
+  }
+  // Don't wipe the session on the login endpoint itself — a wrong password is
+  // not an expired session.
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    logout();
+    throw new Error('Session expired — log in again');
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body.error && body.error.message) || `HTTP ${res.status}`);
   return body;
@@ -37,20 +47,35 @@ function logout() {
 
 $('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const btn = document.querySelector('#login-form button[type="submit"]');
+  const errBox = $('#login-error');
+  const email = $('#login-email').value.trim();
+  const password = $('#login-password').value;
+  if (!email || !password) {
+    errBox.textContent = 'Enter both email and password.';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  errBox.textContent = '';
   try {
     const body = await api('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email: $('#login-email').value, password: $('#login-password').value }),
+      body: JSON.stringify({ email, password }),
     });
     state.token = body.token; state.user = body.user;
     localStorage.setItem('sg_token', body.token);
     localStorage.setItem('sg_user', JSON.stringify(body.user));
-    $('#login-error').textContent = '';
+    errBox.textContent = '';
     showApp();
   } catch (err) {
-    $('#login-error').textContent = err.message;
+    errBox.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
   }
 });
+window.__sg_login_ready = true;
 
 $('#logout').addEventListener('click', logout);
 

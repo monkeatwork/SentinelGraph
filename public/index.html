@@ -96,5 +96,15 @@
   </div>
 
   <script src="/app.js"></script>
+  <script>
+    // Watchdog: if app.js failed to load/start (e.g. cached copy, blocked script),
+    // the Sign in button would silently do nothing — surface that instead.
+    setTimeout(function () {
+      if (!window.__sg_login_ready) {
+        var el = document.getElementById('login-error');
+        if (el) el.textContent = 'Dashboard script did not start. Hard-refresh with Cmd+Shift+R. If it persists, open the console (Cmd+Option+J) and send me the red error line.';
+      }
+    }, 1500);
+  </script>
 </body>
 </html>
