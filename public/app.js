@@ -239,6 +239,12 @@ function layoutGraph() {
   const W = wrap.clientWidth, H = wrap.clientHeight;
   const { scale, tx, ty } = state.graph.view;
 
+  // diagnostics for on-screen verification
+  const dbg = $('#graph-debug');
+  if (dbg) {
+    dbg.textContent = `canvas ${W}×${H} · nodes ${state.graph.nodes.size} · view s=${scale.toFixed(2)} t=(${tx.toFixed(0)},${ty.toFixed(0)})`;
+  }
+
   const nodes = [...state.graph.nodes.values()];
   const edges = [...state.graph.edges.values()];
   const labelFilter = $('#graph-label-filter').value;
