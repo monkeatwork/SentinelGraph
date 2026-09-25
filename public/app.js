@@ -142,12 +142,15 @@ const COLORS = {
 
 function nodeKey(n) { return `${n.label}|${n.key}`; }
 
-function addNode(label, key, name, props) {
+function addNode(label, key, name, props, near) {
   const k = nodeKey({ label, key });
   if (!state.graph.nodes.has(k)) {
     state.graph.nodes.set(k, {
       label, key, name: name || key, props: props || {},
-      x: Math.random() * 600 - 300, y: Math.random() * 400 - 200, vx: 0, vy: 0,
+      // seed next to the parent node so expansions are stable, not chaotic
+      x: near ? near.x + (Math.random() - 0.5) * 100 : Math.random() * 600 - 300,
+      y: near ? near.y + (Math.random() - 0.5) * 100 : Math.random() * 400 - 200,
+      vx: 0, vy: 0,
     });
   }
   return state.graph.nodes.get(k);
@@ -180,12 +183,13 @@ async function expandNode(label, key) {
     const me = addNode(label, key, body.node.name, body.node.props);
     state.graph.nodes.set(nodeKey(me), me);
     for (const nb of body.neighbors) {
-      const n = addNode(nb.label, nb.key, nb.name);
+      const n = addNode(nb.label, nb.key, nb.name, null, me); // spawn near parent
       state.graph.nodes.set(nodeKey(n), n);
       addEdge(me, n, nb.rel, nb.direction);
     }
     updateGraphEmpty();
-    layoutGraph();
+    simulate();      // physics once — the graph then stays still
+    layoutGraph();   // render
     $('#graph-status').textContent = '';
   } catch (err) {
     $('#graph-status').textContent = err.message;
@@ -228,6 +232,57 @@ function nodeAt(wx, wy) {
   return best;
 }
 
+function visibleSets() {
+  const nodes = [...state.graph.nodes.values()];
+  const edges = [...state.graph.edges.values()];
+  const labelFilter = $('#graph-label-filter').value;
+  const visible = new Set(nodes.filter((n) => !labelFilter || n.label === labelFilter).map(nodeKey));
+  return {
+    nodes,
+    edges,
+    visible,
+    visibleNodes: nodes.filter((n) => visible.has(nodeKey(n))),
+    visibleEdges: edges.filter((e) => visible.has(e.a) && visible.has(e.b)),
+  };
+}
+
+/**
+ * Run the force simulation ONCE (only when data changes: search/expand/filter).
+ * Never re-run on mouse move — that was the "graph keeps rotating/swirling" bug.
+ */
+function simulate() {
+  if (dragState) return;
+  const { visibleNodes, visibleEdges, visible } = visibleSets();
+  if (!visibleNodes.length) return;
+  const k = 0.05, rep = 11000, c = 0.85;
+  const MAX_SPEED = 60; // velocities can never explode to Infinity/NaN
+  for (let i = 0; i < 120; i++) {
+    for (const n of visibleNodes) {
+      n.vx = 0; n.vy = 0;
+      for (const m of visibleNodes) {
+        if (n === m) continue;
+        const dx = n.x - m.x, dy = n.y - m.y;
+        const d2 = dx * dx + dy * dy || 1;
+        const f = rep / d2;
+        n.vx += (dx / Math.sqrt(d2)) * f;
+        n.vy += (dy / Math.sqrt(d2)) * f;
+      }
+      n.vx -= n.x * k;
+      n.vy -= n.y * k;
+      for (const e of visibleEdges) {
+        if (e.a === nodeKey(n)) { const m = state.graph.nodes.get(e.b); if (m && visible.has(nodeKey(m))) { n.vx += (m.x - n.x) * 0.14; n.vy += (m.y - n.y) * 0.14; } }
+        if (e.b === nodeKey(n)) { const m = state.graph.nodes.get(e.a); if (m && visible.has(nodeKey(m))) { n.vx += (m.x - n.x) * 0.14; n.vy += (m.y - n.y) * 0.14; } }
+      }
+      n.vx *= c; n.vy *= c;
+      const sp = Math.hypot(n.vx, n.vy);
+      if (sp > MAX_SPEED) { n.vx *= MAX_SPEED / sp; n.vy *= MAX_SPEED / sp; }
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) { n.x = 0; n.y = 0; n.vx = 0; n.vy = 0; }
+      n.x += n.vx; n.y += n.vy;
+    }
+  }
+}
+
+/** Pure render — no physics. Called on mouse move, hover, pan, zoom, resize. */
 function layoutGraph() {
   const canvas = $('#graph-canvas');
   const wrap = $('#graph-canvas-wrap');
@@ -246,43 +301,7 @@ function layoutGraph() {
     dbg.textContent = `canvas ${W}×${H} · nodes ${state.graph.nodes.size} · view s=${scale.toFixed(2)} t=(${tx.toFixed(0)},${ty.toFixed(0)})`;
   }
 
-  const nodes = [...state.graph.nodes.values()];
-  const edges = [...state.graph.edges.values()];
-  const labelFilter = $('#graph-label-filter').value;
-  const visible = new Set(nodes.filter((n) => !labelFilter || n.label === labelFilter).map(nodeKey));
-  const visibleNodes = nodes.filter((n) => visible.has(nodeKey(n)));
-  const visibleEdges = edges.filter((e) => visible.has(e.a) && visible.has(e.b));
-
-  // force simulation (only if not dragging)
-  if (!dragState) {
-    const k = 0.05, rep = 11000, c = 0.85;
-    const MAX_SPEED = 60; // clamp: velocities can never explode to Infinity/NaN
-    for (let i = 0; i < 70; i++) {
-      for (const n of visibleNodes) {
-        n.vx = 0; n.vy = 0;
-        for (const m of visibleNodes) {
-          if (n === m) continue;
-          const dx = n.x - m.x, dy = n.y - m.y;
-          const d2 = dx * dx + dy * dy || 1;
-          const f = rep / d2;
-          n.vx += (dx / Math.sqrt(d2)) * f;
-          n.vy += (dy / Math.sqrt(d2)) * f;
-        }
-        n.vx -= n.x * k;
-        n.vy -= n.y * k;
-        for (const e of visibleEdges) {
-          if (e.a === nodeKey(n)) { const m = state.graph.nodes.get(e.b); if (m && visible.has(nodeKey(m))) { n.vx += (m.x - n.x) * 0.14; n.vy += (m.y - n.y) * 0.14; } }
-          if (e.b === nodeKey(n)) { const m = state.graph.nodes.get(e.a); if (m && visible.has(nodeKey(m))) { n.vx += (m.x - n.x) * 0.14; n.vy += (m.y - n.y) * 0.14; } }
-        }
-        n.vx *= c; n.vy *= c;
-        // defensive clamp — never let a physics bug blank the canvas again
-        const sp = Math.hypot(n.vx, n.vy);
-        if (sp > MAX_SPEED) { n.vx *= MAX_SPEED / sp; n.vy *= MAX_SPEED / sp; }
-        if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) { n.x = 0; n.y = 0; n.vx = 0; n.vy = 0; }
-        n.x += n.vx; n.y += n.vy;
-      }
-    }
-  }
+  const { visibleNodes, visibleEdges, visible } = visibleSets();
 
   ctx.clearRect(0, 0, W, H);
   const isLight = document.body.dataset.theme === 'light';
