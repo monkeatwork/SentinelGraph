@@ -220,6 +220,7 @@ function nodeAt(wx, wy) {
   const { scale, tx, ty } = state.graph.view;
   let best = null, bd = 22 / scale;
   for (const n of state.graph.nodes.values()) {
+    if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
     const d = Math.hypot(n.x - wx, n.y - wy);
     const r = Math.max(7, 5 + Math.min(9, Math.sqrt(degreeOf(n)) * 2));
     if (d < bd + r) { bd = d; best = n; }
@@ -255,6 +256,7 @@ function layoutGraph() {
   // force simulation (only if not dragging)
   if (!dragState) {
     const k = 0.05, rep = 11000, c = 0.85;
+    const MAX_SPEED = 60; // clamp: velocities can never explode to Infinity/NaN
     for (let i = 0; i < 70; i++) {
       for (const n of visibleNodes) {
         n.vx = 0; n.vy = 0;
@@ -265,14 +267,18 @@ function layoutGraph() {
           const f = rep / d2;
           n.vx += (dx / Math.sqrt(d2)) * f;
           n.vy += (dy / Math.sqrt(d2)) * f;
-          n.vx -= n.x * k;
-          n.vy -= n.y * k;
         }
+        n.vx -= n.x * k;
+        n.vy -= n.y * k;
         for (const e of visibleEdges) {
           if (e.a === nodeKey(n)) { const m = state.graph.nodes.get(e.b); if (m && visible.has(nodeKey(m))) { n.vx += (m.x - n.x) * 0.14; n.vy += (m.y - n.y) * 0.14; } }
           if (e.b === nodeKey(n)) { const m = state.graph.nodes.get(e.a); if (m && visible.has(nodeKey(m))) { n.vx += (m.x - n.x) * 0.14; n.vy += (m.y - n.y) * 0.14; } }
         }
         n.vx *= c; n.vy *= c;
+        // defensive clamp — never let a physics bug blank the canvas again
+        const sp = Math.hypot(n.vx, n.vy);
+        if (sp > MAX_SPEED) { n.vx *= MAX_SPEED / sp; n.vy *= MAX_SPEED / sp; }
+        if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) { n.x = 0; n.y = 0; n.vx = 0; n.vy = 0; }
         n.x += n.vx; n.y += n.vy;
       }
     }
@@ -294,6 +300,7 @@ function layoutGraph() {
   const ordered = [...visibleNodes].sort((a, b) => degreeOf(b) - degreeOf(a));
   for (const n of ordered) {
     const p = w2s(n, scale, tx, ty);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue; // never draw NaN
     if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) continue;
     const r = Math.max(7, 5 + Math.min(9, Math.sqrt(degreeOf(n)) * 2));
     // halo
