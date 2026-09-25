@@ -4,3 +4,6 @@ data/
 coverage/
 *.log
 .DS_Store
+# Internal team/guide documents (kept out of the public repo)
+TEAM_RUNDOWN.md
+docs/BEGINNERS_GUIDE.md

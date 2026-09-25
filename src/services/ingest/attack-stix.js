@@ -1,7 +1,7 @@
 /**
  * Phase 2 — MITRE ATT&CK Enterprise STIX 2.1 ingestion → MongoDB (entities) + Neo4j (graph).
  *
- * Rules (AGENT_PLAN global rules):
+ * Rules (project build rules):
  *  - Mongo FIRST, then Neo4j (no cross-DB transactions).
  *  - MERGE / upserts only → idempotent.
  *  - One join key: mitreId present + indexed in both stores.

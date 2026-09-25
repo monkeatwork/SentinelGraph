@@ -70,7 +70,6 @@ npm test                        # jest + supertest (DBs must be running)
 
 Stop the databases at the end of the day:
 `brew services stop neo4j mongodb/brew/mongodb-community` (native) or `docker compose down` (Docker).
-`docs/BEGINNERS_GUIDE.md` explains every command in plain language.
 
 Login: `admin@sentinelgraph.local` / `Admin@123` (admin), `analyst@vitstudent.ac.in` / `Analyst@123`.
 
