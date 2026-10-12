@@ -43,7 +43,8 @@ function initTheme() {
 }
 
 /* ============================ Router ============================ */
-const PAGES = ['login', 'graph', 'ask', 'insights', 'reports'];
+const PAGES = ['login', 'graph', 'ask', 'insights', 'reports', 'admin'];
+const isAdmin = () => Boolean(state.user && state.user.role === 'admin');
 
 function currentRoute() {
   const r = (location.hash.replace(/^#\/?/, '') || 'graph').toLowerCase();
@@ -61,6 +62,7 @@ function renderRoute() {
 
   if (!authed && route !== 'login') { location.replace('#/login'); return; }
   if (authed && route === 'login') { location.replace('#/graph'); return; }
+  if (route === 'admin' && !isAdmin()) { location.replace('#/graph'); return; }
 
   const showLogin = route === 'login';
   $('#page-login').hidden = !showLogin;
@@ -80,6 +82,7 @@ function renderRoute() {
       if (route === 'reports') loadReports();
       if (route === 'ask') { loadAskModes(); loadSavedQueries(); }
       if (route === 'insights') loadInsights();
+      if (route === 'admin') loadAdmin();
     });
   }
 }
@@ -90,9 +93,11 @@ window.addEventListener('hashchange', renderRoute);
 function showUser() {
   const u = state.user;
   $('#user-role').textContent = u ? `${u.role} · ${u.email}` : '';
+  document.querySelectorAll('.admin-only').forEach((el) => el.classList.toggle('hidden', !isAdmin()));
 }
 
 function logout() {
+  adminLoaded = false;
   state.token = null;
   state.user = null;
   localStorage.removeItem('sg_token');
@@ -174,8 +179,9 @@ function degreeOf(node) {
 function updateGraphEmpty() {
   const has = state.graph.nodes.size > 0;
   $('#graph-empty').classList.toggle('hidden', has);
+  $('#zoom-controls').classList.toggle('hidden', !has);
   $('#graph-count-hint').textContent = has
-    ? `${state.graph.nodes.size} nodes · ${state.graph.edges.size} edges — click a node to expand it, drag to pan, scroll to zoom`
+    ? `${state.graph.nodes.size} nodes · ${state.graph.edges.size} edges — click a node to expand it, drag to pan, scroll or use +/− to zoom`
     : '';
 }
 
@@ -425,7 +431,7 @@ function drawHopBadge(ctx, p, r, i, accent) {
 const canvas = $('#graph-canvas');
 const wrap = $('#graph-canvas-wrap');
 
-canvas.addEventListener('mousemove', (e) => {
+canvas.addEventListener('pointermove', (e) => {
   const rect = wrap.getBoundingClientRect();
   const mx = e.clientX - rect.left, my = e.clientY - rect.top;
   const wpt = s2w(mx, my, state.graph.view.scale, state.graph.view.tx, state.graph.view.ty);
@@ -433,7 +439,7 @@ canvas.addEventListener('mousemove', (e) => {
   hoverNode = hit;
   canvas.style.cursor = hit ? 'pointer' : dragState ? 'grabbing' : 'grab';
   if (dragState) {
-    clickMoved = true;
+    if (Math.hypot(mx - dragState.x, my - dragState.y) > 4) clickMoved = true;
     state.graph.view.tx = dragState.tx + (mx - dragState.x);
     state.graph.view.ty = dragState.ty + (my - dragState.y);
     layoutGraph();
@@ -442,15 +448,18 @@ canvas.addEventListener('mousemove', (e) => {
   }
 });
 
-canvas.addEventListener('mouseleave', () => { hoverNode = null; layoutGraph(); });
+canvas.addEventListener('pointerleave', () => { if (!dragState) { hoverNode = null; layoutGraph(); } });
 
-canvas.addEventListener('mousedown', (e) => {
+// pointer events cover mouse, pen and touch (drag-to-pan works on tablets/phones)
+canvas.addEventListener('pointerdown', (e) => {
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* capture is best-effort */ }
   const rect = wrap.getBoundingClientRect();
   dragState = { x: e.clientX - rect.left, y: e.clientY - rect.top, tx: state.graph.view.tx, ty: state.graph.view.ty };
   clickMoved = false;
 });
+canvas.addEventListener('pointercancel', () => { dragState = null; });
 
-canvas.addEventListener('mouseup', (e) => {
+canvas.addEventListener('pointerup', (e) => {
   dragState = null;
   if (clickMoved) return;
   const rect = wrap.getBoundingClientRect();
@@ -478,6 +487,19 @@ canvas.addEventListener('wheel', (e) => {
   state.graph.view.scale = ns;
   layoutGraph();
 }, { passive: false });
+
+function zoomBy(factor) {
+  const { scale, tx, ty } = state.graph.view;
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const ns = Math.min(6, Math.max(0.12, scale * factor));
+  state.graph.view.tx = W / 2 - ((W / 2 - tx) / scale) * ns;
+  state.graph.view.ty = H / 2 - ((H / 2 - ty) / scale) * ns;
+  state.graph.view.scale = ns;
+  layoutGraph();
+}
+$('#zoom-in').addEventListener('click', () => zoomBy(1.25));
+$('#zoom-out').addEventListener('click', () => zoomBy(0.8));
+$('#zoom-fit').addEventListener('click', () => fitAfterLayout());
 
 $('#graph-label-filter').addEventListener('change', layoutGraph);
 $('#graph-reset').addEventListener('click', () => {
@@ -893,87 +915,331 @@ function loadInsights() {
 $('#sim-form').addEventListener('submit', (e) => { e.preventDefault(); loadSimilar(); });
 $('#mit-form').addEventListener('submit', (e) => { e.preventDefault(); loadMitigations(); });
 
+/* ============================ Admin page ============================ */
+function flash(sel, msg, isError = false) {
+  const el = $(sel);
+  el.textContent = msg;
+  el.classList.toggle('error-text', isError);
+}
+const fmtDay = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+
+let entityRows = [];
+async function searchEntities() {
+  const q = $('#ent-q').value.trim();
+  const type = $('#ent-filter').value;
+  const params = new URLSearchParams({ limit: '20' });
+  if (q) params.set('q', q);
+  if (type) params.set('entityType', type);
+  $('#ent-list').innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const body = await api(`/api/entities?${params}`);
+    entityRows = body.entities;
+    renderEntities();
+  } catch (err) {
+    $('#ent-list').innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderEntities(editingId = null) {
+  if (!entityRows.length) { $('#ent-list').innerHTML = '<p class="hint list-empty">No entities match.</p>'; return; }
+  let html = '<table class="matrix admin-table"><thead><tr><th>MITRE ID</th><th>Type</th><th>Name</th><th></th></tr></thead><tbody>';
+  entityRows.forEach((e, i) => {
+    if (e.mitreId === editingId) {
+      html += `<tr class="editing" data-i="${i}"><td>${escapeHtml(e.mitreId)}</td><td>${escapeHtml(e.entityType)}</td>
+        <td colspan="2"><form class="edit-form">
+          <input name="name" value="${escapeAttr(e.name)}" aria-label="Name" required />
+          <input name="aliases" value="${escapeAttr((e.aliases || []).join(', '))}" placeholder="Aliases, comma separated" aria-label="Aliases" />
+          <input name="description" value="${escapeAttr(e.description || '')}" placeholder="Description" aria-label="Description" />
+          <span class="row-actions"><button class="btn btn-sm btn-primary">Save</button><button type="button" class="btn btn-sm btn-ghost act-cancel">Cancel</button></span>
+        </form></td></tr>`;
+    } else {
+      html += `<tr data-i="${i}"><td class="mono">${escapeHtml(e.mitreId)}</td><td>${escapeHtml(e.entityType)}</td><td>${escapeHtml(e.name)}</td>
+        <td class="row-actions"><button class="btn btn-sm act-graph" title="Open in graph">Graph</button><button class="btn btn-sm act-edit">Edit</button><button class="btn btn-sm act-del">Delete</button></td></tr>`;
+    }
+  });
+  $('#ent-list').innerHTML = html + '</tbody></table>';
+  $('#ent-list').querySelectorAll('tr[data-i]').forEach((row) => {
+    const e = entityRows[Number(row.dataset.i)];
+    const on = (sel, fn) => { const b = row.querySelector(sel); if (b) b.addEventListener('click', fn); };
+    on('.act-graph', () => openInGraph(e.name || e.mitreId));
+    on('.act-edit', () => renderEntities(e.mitreId));
+    on('.act-cancel', () => renderEntities());
+    on('.act-del', (ev) => confirmDelete(ev.currentTarget, e));
+    const form = row.querySelector('.edit-form');
+    if (form) form.addEventListener('submit', (ev) => { ev.preventDefault(); saveEntity(e, new FormData(form)); });
+  });
+}
+
+/** Two-step delete (no blocking browser dialog): first click arms, second click deletes. */
+function confirmDelete(btn, e) {
+  if (btn.dataset.armed) { deleteEntity(e); return; }
+  btn.dataset.armed = '1';
+  btn.textContent = 'Confirm?';
+  btn.classList.add('btn-danger');
+  setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = 'Delete'; btn.classList.remove('btn-danger'); } }, 4000);
+}
+
+async function saveEntity(e, fd) {
+  const body = {
+    name: String(fd.get('name')).trim(),
+    aliases: String(fd.get('aliases')).split(',').map((a) => a.trim()).filter(Boolean),
+    description: String(fd.get('description')).trim(),
+  };
+  try {
+    const out = await api(`/api/entities/${encodeURIComponent(e.mitreId)}`, { method: 'PUT', body: JSON.stringify(body) });
+    entityRows = entityRows.map((x) => (x.mitreId === e.mitreId ? out.entity : x));
+    renderEntities();
+    flash('#ent-status', `Updated ${e.mitreId} in MongoDB and Neo4j.`);
+  } catch (err) { flash('#ent-status', err.message, true); }
+}
+
+async function deleteEntity(e) {
+  try {
+    await api(`/api/entities/${encodeURIComponent(e.mitreId)}`, { method: 'DELETE' });
+    entityRows = entityRows.filter((x) => x.mitreId !== e.mitreId);
+    renderEntities();
+    flash('#ent-status', `Deleted ${e.mitreId} from MongoDB and DETACH DELETEd its graph node.`);
+  } catch (err) { flash('#ent-status', err.message, true); }
+}
+
+$('#ent-search').addEventListener('submit', (ev) => { ev.preventDefault(); searchEntities(); });
+$('#ent-create').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const body = {
+    mitreId: $('#ent-id').value.trim(),
+    entityType: $('#ent-type').value,
+    name: $('#ent-name').value.trim() || undefined,
+    description: $('#ent-desc').value.trim() || undefined,
+  };
+  try {
+    const out = await api('/api/entities', { method: 'POST', body: JSON.stringify(body) });
+    flash('#ent-status', `Created ${out.entity.mitreId} (${out.entity.entityType}) in both stores.`);
+    $('#ent-create').reset();
+    entityRows = [out.entity, ...entityRows.filter((x) => x.mitreId !== out.entity.mitreId)];
+    renderEntities();
+  } catch (err) { flash('#ent-status', err.message, true); }
+});
+
+async function loadUsers() {
+  $('#user-list').innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const body = await api('/api/users');
+    const me = state.user && state.user.email;
+    let html = '<table class="matrix admin-table"><thead><tr><th>Email</th><th>Role</th><th>Saved</th><th>Created</th></tr></thead><tbody>';
+    for (const u of body.users) {
+      const self = u.email === me;
+      html += `<tr><td>${escapeHtml(u.email)}${self ? ' <span class="hint">(you)</span>' : ''}</td>
+        <td><select class="select select-sm role-select" data-id="${escapeAttr(u._id)}" ${self ? 'disabled title="You cannot change your own role"' : ''} aria-label="Role for ${escapeAttr(u.email)}">
+          <option value="analyst" ${u.role === 'analyst' ? 'selected' : ''}>analyst</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option></select></td>
+        <td>${(u.savedQueries || []).length}</td><td>${fmtDay(u.createdAt)}</td></tr>`;
+    }
+    $('#user-list').innerHTML = html + '</tbody></table>';
+    $('#user-list').querySelectorAll('.role-select').forEach((sel) => sel.addEventListener('change', async () => {
+      try {
+        const out = await api(`/api/users/${encodeURIComponent(sel.dataset.id)}/role`, { method: 'PATCH', body: JSON.stringify({ role: sel.value }) });
+        flash('#user-status', `${out.user.email} is now ${out.user.role}.`);
+      } catch (err) { flash('#user-status', err.message, true); loadUsers(); }
+    }));
+  } catch (err) {
+    $('#user-list').innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+$('#user-create').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const body = {
+    email: $('#user-email').value.trim(),
+    name: $('#user-name').value.trim() || undefined,
+    password: $('#user-pass').value,
+    role: $('#user-role-new').value,
+  };
+  try {
+    const out = await api('/api/auth/register', { method: 'POST', body: JSON.stringify(body) });
+    flash('#user-status', `Registered ${out.user.email} as ${out.user.role}.`);
+    $('#user-create').reset();
+    loadUsers();
+  } catch (err) { flash('#user-status', err.message, true); }
+});
+
+$('#health-run').addEventListener('click', async () => {
+  const btn = $('#health-run');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  try {
+    const { drift, latencyMs, report: r } = await api('/api/admin/reconcile');
+    const row = (label, m, g, a, b) => `<tr><td>${label}</td><td class="num">${m.toLocaleString()}</td><td class="num">${g.toLocaleString()}</td><td class="num">${a}</td><td class="num">${b}</td></tr>`;
+    $('#health-out').innerHTML = `
+      <p class="health-verdict ${drift ? 'bad' : 'good'}">${drift ? `⚠ ${drift} key(s) out of sync` : '✓ Both stores agree on every join key'} <span class="hint">· ${latencyMs} ms</span></p>
+      <table class="matrix"><thead><tr><th>Keys</th><th>MongoDB</th><th>Neo4j</th><th>Only Mongo</th><th>Only Neo4j</th></tr></thead><tbody>
+      ${row('mitreId', r.entities.mongoCount, r.entities.graphCount, r.entities.missingInGraph.length, r.entities.missingInMongo.length)}
+      ${row('cveId', r.vulnerabilities.mongoCount, r.vulnerabilities.graphCount, r.vulnerabilities.missingInGraph.length, r.vulnerabilities.missingInMongo.length)}
+      </tbody></table>`;
+  } catch (err) {
+    $('#health-out').innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run consistency check';
+  }
+});
+
+let adminLoaded = false;
+function loadAdmin() {
+  if (adminLoaded) return;
+  adminLoaded = true;
+  searchEntities();
+  loadUsers();
+}
+
 /* ============================ Reports page ============================ */
-function drawBars(canvas, items, { label = (r) => r._id, value = (r) => r.count, color = '#4f46e5', rotate = false }) {
-  if (!canvas || !canvas.parentElement || canvas.parentElement.clientWidth === 0) return;
+const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+const SEVERITY_COLORS = { CRITICAL: '#e5484d', HIGH: '#f76b15', MEDIUM: '#e3b341', LOW: '#8b949e' };
+const reportsData = { years: null };
+
+/** Stacked bars: items = [{ label, parts: { CRITICAL: n, ... } }]. Theme-aware, thins labels when crowded. */
+function drawStacked(canvas, items) {
+  const box = canvas && canvas.parentElement;
+  if (!box || box.clientWidth === 0) return;
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = canvas.parentElement.clientWidth * dpr;
-  canvas.height = (canvas.parentElement.clientHeight || 180) * dpr;
+  const W = box.clientWidth, H = Math.max(160, box.clientHeight);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = `${W}px`; canvas.style.height = `${H}px`;
   const ctx = canvas.getContext('2d');
-  const W = canvas.width / dpr, H = canvas.height / dpr;
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
-  if (!items.length) {
-    ctx.fillStyle = 'var(--muted)';
-    ctx.font = '12px -apple-system, sans-serif';
-    ctx.fillText('No data yet — ask a question first.', 12, 24);
-    return;
-  }
-  const max = Math.max(1, ...items.map(value));
-  const padL = 40, padB = 34;
-  const bars = items.slice(0, 14);
-  const bw = (W - padL - 8) / Math.max(1, bars.length);
   const isLight = document.body.dataset.theme === 'light';
-  bars.forEach((it, i) => {
-    const h = (value(it) / max) * (H - padB - 20);
-    ctx.fillStyle = isLight ? '#e2e8f0' : '#21262d';
-    ctx.fillRect(padL + i * bw + bw * 0.14, H - padB - h, bw * 0.72, h);
-    ctx.fillStyle = color;
-    ctx.fillRect(padL + i * bw + bw * 0.14, H - padB - h + 2, bw * 0.72, Math.max(2, h - 2));
-    ctx.fillStyle = isLight ? '#64748b' : '#8b949e';
-    ctx.font = '9px -apple-system, sans-serif';
-    ctx.save();
-    if (rotate) {
-      ctx.translate(padL + i * bw + bw / 2, H - 8);
-      ctx.rotate(-Math.PI / 3.2);
+  const muted = isLight ? '#64748b' : '#8b949e';
+  const grid = isLight ? '#e2e8f0' : '#30363d';
+  const totals = items.map((it) => Object.values(it.parts).reduce((a, b) => a + b, 0));
+  const max = Math.max(1, ...totals);
+  const padL = 36, padB = 22, padT = 16;
+  const plotH = H - padB - padT;
+  const bw = (W - padL - 4) / Math.max(1, items.length);
+  ctx.font = '10px -apple-system, sans-serif';
+  // gridlines + y labels
+  for (const f of [0, 0.5, 1]) {
+    const y = padT + plotH * (1 - f);
+    ctx.strokeStyle = grid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - 4, y); ctx.stroke();
+    ctx.fillStyle = muted;
+    const t = String(Math.round(max * f));
+    ctx.fillText(t, padL - 6 - ctx.measureText(t).width, y + 3);
+  }
+  const labelEvery = Math.ceil(items.length / Math.max(1, Math.floor((W - padL) / 38)));
+  items.forEach((it, i) => {
+    let y = padT + plotH;
+    const x = padL + i * bw + bw * 0.15, w = Math.max(2, bw * 0.7);
+    for (const sev of SEVERITY_ORDER) {
+      const v = it.parts[sev] || 0;
+      if (!v) continue;
+      const h = (v / max) * plotH;
+      ctx.fillStyle = SEVERITY_COLORS[sev];
+      ctx.fillRect(x, y - h, w, h);
+      y -= h;
     }
-    ctx.fillText(String(label(it)).slice(0, 14), rotate ? 0 : padL + i * bw + 1, rotate ? 0 : H - 14);
-    ctx.restore();
-  });
-  ctx.fillStyle = isLight ? '#475569' : '#8b949e';
-  bars.forEach((it, i) => {
-    const h = (value(it) / max) * (H - padB - 20);
-    ctx.fillText(String(value(it)), padL + i * bw + bw * 0.14, H - padB - h - 4);
+    if (i % labelEvery === 0) {
+      ctx.fillStyle = muted;
+      const t = String(it.label);
+      ctx.fillText(t, padL + i * bw + bw / 2 - ctx.measureText(t).width / 2, H - 6);
+    }
   });
 }
 
-async function loadReports() {
+const cardError = (sel, err) => { $(sel).innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`; };
+const pipelineNote = (body) => `${body.pipeline || 'aggregation pipeline'} · ${body.latencyMs} ms`;
+
+async function loadSeverityByYear() {
   try {
-    const months = await api('/api/analytics/cve-severity-by-month');
-    const byMonth = new Map();
-    for (const r of months.rows) {
-      const k = `${r._id.year}-${String(r._id.month).padStart(2, '0')}`;
-      if (!byMonth.has(k)) byMonth.set(k, {});
-      byMonth.get(k)[r._id.severity] = (byMonth.get(k)[r._id.severity] || 0) + r.count;
+    const body = await api('/api/analytics/cve-severity-by-month');
+    const byYear = new Map();
+    for (const r of body.rows) {
+      const y = r._id.year;
+      if (!byYear.has(y)) byYear.set(y, {});
+      const parts = byYear.get(y);
+      parts[r._id.severity] = (parts[r._id.severity] || 0) + r.count;
     }
-    const entries = [...byMonth.entries()].slice(-12);
-    const totals = entries.map(([m, s]) => ({ _id: m, count: Object.values(s).reduce((a, b) => a + b, 0) }));
-    drawBars($('#chart-sev-month'), totals, { label: (r) => r._id, value: (r) => r.count });
-
-    const sources = await api('/api/analytics/most-cited-sources');
-    drawBars($('#chart-sources'), sources.rows, {
-      label: (r) => String(r._id).slice(0, 18), value: (r) => r.citations, color: '#e3b341',
-    });
-
-    const cross = await api('/api/analytics/severity-exploited-crosstab');
-    drawBars($('#chart-crosstab'), cross.rows.map((r) => ({
-      _id: `${r._id.severity}:${r._id.knownExploited ? 'KEV' : 'no'}:${r.count}`,
-      count: r.count,
-    })), { color: '#d2a8ff', rotate: true });
-
-    const cpe = await api('/api/analytics/chunks-per-entity');
-    $('#chunks-entity-list').innerHTML = cpe.rows.slice(0, 12)
-      .map((r) => `<div><span title="${escapeAttr(r._id)}">${escapeHtml(r.entityName || r.entityId || r._id)}</span><span class="n">${r.chunkCount} chunks</span></div>`)
-      .join('');
+    const years = [...byYear.keys()].sort((a, b) => a - b).slice(-15);
+    reportsData.years = years.map((y) => ({ label: y, parts: byYear.get(y) }));
+    $('#sub-sev-year').textContent = `${pipelineNote(body)} · last ${years.length} years with data`;
+    const present = SEVERITY_ORDER.filter((sev) => reportsData.years.some((it) => it.parts[sev]));
+    $('#legend-sev-year').innerHTML = present.map((sev) => `<span class="lg"><i style="background:${SEVERITY_COLORS[sev]}"></i>${sev.toLowerCase()}</span>`).join('');
+    drawStacked($('#chart-sev-year'), reportsData.years);
   } catch (err) {
-    console.error('[reports]', err);
+    $('#sub-sev-year').innerHTML = `<span class="error-text">${escapeHtml(err.message)}</span>`;
   }
 }
+
+async function loadSources() {
+  try {
+    const body = await api('/api/analytics/most-cited-sources');
+    $('#sub-sources').textContent = `${pipelineNote(body)} · citations in Q&A answers`;
+    $('#sources-list').innerHTML = body.rows.length
+      ? barRows(body.rows, { value: (r) => r.citations, label: (r) => String(r._id), right: (r) => String(r.citations) })
+      : '<p class="hint list-empty">No citations yet. Ask a question first.</p>';
+  } catch (err) { cardError('#sources-list', err); }
+}
+
+async function loadCrosstab() {
+  try {
+    const body = await api('/api/analytics/severity-exploited-crosstab');
+    $('#sub-crosstab').textContent = pipelineNote(body);
+    const bySev = new Map();
+    for (const r of body.rows) {
+      const sev = r._id.severity;
+      if (!bySev.has(sev)) bySev.set(sev, { kev: 0, not: 0, scoreSum: 0 });
+      const row = bySev.get(sev);
+      row[r._id.knownExploited ? 'kev' : 'not'] += r.count;
+      row.scoreSum += (r.avgScore || 0) * r.count;
+    }
+    const sevs = SEVERITY_ORDER.filter((s) => bySev.has(s));
+    const fmt = (n) => n.toLocaleString();
+    let html = '<table class="matrix"><thead><tr><th>Severity</th><th>In KEV</th><th>Not in KEV</th><th>% exploited</th><th>Avg CVSS</th></tr></thead><tbody>';
+    let tk = 0, tn = 0;
+    for (const sev of sevs) {
+      const r = bySev.get(sev); const total = r.kev + r.not; tk += r.kev; tn += r.not;
+      html += `<tr><td class="cap"><i class="sev-dot" style="background:${SEVERITY_COLORS[sev]}"></i>${sev.toLowerCase()}</td>` +
+        `<td class="num strong">${fmt(r.kev)}</td><td class="num">${fmt(r.not)}</td>` +
+        `<td class="num">${((r.kev / total) * 100).toFixed(1)}%</td><td class="num">${(r.scoreSum / total).toFixed(1)}</td></tr>`;
+    }
+    html += `</tbody><tfoot><tr><td>Total</td><td class="num strong">${fmt(tk)}</td><td class="num">${fmt(tn)}</td>` +
+      `<td class="num">${((tk / Math.max(1, tk + tn)) * 100).toFixed(1)}%</td><td></td></tr></tfoot></table>`;
+    $('#crosstab-table').innerHTML = html;
+  } catch (err) { cardError('#crosstab-table', err); }
+}
+
+async function loadChunksPerEntity() {
+  try {
+    const body = await api('/api/analytics/chunks-per-entity');
+    $('#sub-chunks').textContent = pipelineNote(body);
+    $('#chunks-entity-list').innerHTML = body.rows.slice(0, 12)
+      .map((r) => `<div><span title="${escapeAttr(r._id)}">${escapeHtml(r.entityName || r.entityId || r._id)}</span><span class="n">${r.chunkCount} chunks</span></div>`)
+      .join('') || '<p class="hint list-empty">No chunks yet.</p>';
+  } catch (err) { cardError('#chunks-entity-list', err); }
+}
+
+function loadReports() {
+  for (const sel of ['#sources-list', '#crosstab-table', '#chunks-entity-list']) {
+    if (!$(sel).innerHTML.trim()) $(sel).innerHTML = '<p class="hint">Loading…</p>';
+  }
+  loadSeverityByYear();
+  loadSources();
+  loadCrosstab();
+  loadChunksPerEntity();
+}
+
+function redrawCharts() {
+  layoutGraph();
+  if (reportsData.years && currentRoute() === 'reports') drawStacked($('#chart-sev-year'), reportsData.years);
+}
+window.addEventListener('resize', () => { if (currentRoute() === 'reports' && reportsData.years) drawStacked($('#chart-sev-year'), reportsData.years); });
 
 /* ============================ Boot ============================ */
 $('#theme-toggle').addEventListener('click', () => {
   applyTheme(document.body.dataset.theme === 'light' ? 'dark' : 'light');
+  redrawCharts(); // canvases read theme colours at draw time
 });
+
+if (/[?&]debug\b/.test(location.search)) document.body.classList.add('debug');
 
 initTheme();
 

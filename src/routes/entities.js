@@ -3,13 +3,9 @@ const express = require('express');
 const { getDb } = require('../config/mongo');
 const { getDriver } = require('../config/neo4j');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { LABELS, keyOf, httpError } = require('../services/graphMeta');
+const { ENTITY_LABELS, httpError } = require('../services/graphMeta');
 
 const router = express.Router();
-
-function toKeyProp(entityType) {
-  return keyOf(entityType) === 'mitreId' ? 'mitreId' : null;
-}
 
 /** POST /api/entities — admin only; insert document + mirror graph node */
 router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
@@ -17,7 +13,9 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
   try {
     const { mitreId, entityType, name, aliases, description, externalRefs } = req.body || {};
     if (!mitreId || !entityType) throw httpError(400, 'BAD_REQUEST', 'mitreId and entityType are required');
-    if (!keyOf(entityType)) throw httpError(400, 'BAD_REQUEST', `Unknown entityType '${entityType}'. Valid: ${LABELS.join(', ')}`);
+    if (!ENTITY_LABELS.has(entityType)) {
+      throw httpError(400, 'BAD_REQUEST', `entityType must be one of: ${[...ENTITY_LABELS].join(', ')} (Software, Vulnerability and Sector are not mitreId-keyed)`);
+    }
 
     const db = await getDb();
     const doc = {
@@ -107,10 +105,12 @@ router.put('/:mitreId', requireAuth, requireRole('admin'), async (req, res, next
     if (description !== undefined) $set.description = description;
     if (externalRefs !== undefined) $set.externalRefs = externalRefs;
 
-    const type = entityType || existing.entityType;
-    if (entityType && !keyOf(entityType)) throw httpError(400, 'BAD_REQUEST', `Unknown entityType '${entityType}'`);
+    // a type change would relabel the Mongo doc but not the graph node (cross-store drift)
+    if (entityType && entityType !== existing.entityType) {
+      throw httpError(400, 'BAD_REQUEST', 'entityType cannot be changed; delete the entity and create it again');
+    }
 
-    await db.collection('entities').updateOne({ mitreId }, { $set: { ...$set, entityType: type } });
+    await db.collection('entities').updateOne({ mitreId }, { $set });
 
     const driver = getDriver();
     session = driver.session();

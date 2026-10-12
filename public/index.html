@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SentinelGraph — CTI dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%94%AD%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body data-theme="light">
@@ -46,6 +47,7 @@
         <a href="#/ask" data-nav="ask" class="nav-link">Ask</a>
         <a href="#/insights" data-nav="insights" class="nav-link">Insights</a>
         <a href="#/reports" data-nav="reports" class="nav-link">Reports</a>
+        <a href="#/admin" data-nav="admin" class="nav-link admin-only hidden">Admin</a>
       </nav>
       <div class="user-box">
         <button id="theme-toggle" class="icon-btn" title="Toggle light/dark mode" aria-label="Toggle theme">🌓</button>
@@ -89,6 +91,11 @@
         <div id="graph-canvas-wrap" class="panel graph-wrap">
           <canvas id="graph-canvas"></canvas>
           <div id="graph-debug" title="canvas size · view transform · visible nodes"></div>
+          <div id="zoom-controls" class="zoom-controls hidden">
+            <button id="zoom-in" class="icon-btn" title="Zoom in" aria-label="Zoom in">+</button>
+            <button id="zoom-out" class="icon-btn" title="Zoom out" aria-label="Zoom out">−</button>
+            <button id="zoom-fit" class="icon-btn" title="Fit graph to view" aria-label="Fit graph to view">⤢</button>
+          </div>
           <div id="graph-empty" class="empty-state">
             <div class="empty-icon">🕸️</div>
             <p>Search for an entity to start exploring the threat graph.</p>
@@ -168,22 +175,85 @@
         </div>
       </section>
 
+      <!-- ADMIN PAGE (admin role only) -->
+      <section id="page-admin" class="view">
+        <div class="admin-grid">
+          <div class="panel admin-card admin-entities">
+            <div class="insight-head">
+              <h3>Threat entities</h3>
+              <p class="hint">Create, edit and delete ATT&amp;CK entities. Every change is written to MongoDB first, then mirrored to the Neo4j graph.</p>
+            </div>
+            <form id="ent-create" class="form-grid">
+              <input id="ent-id" placeholder="MITRE ID, e.g. G9001" required aria-label="MITRE ID" />
+              <select id="ent-type" class="select" aria-label="Entity type">
+                <option>ThreatActor</option><option>Campaign</option><option>Malware</option>
+                <option>Technique</option><option>Tactic</option><option>Mitigation</option>
+              </select>
+              <input id="ent-name" placeholder="Name" aria-label="Name" />
+              <input id="ent-desc" placeholder="Description (optional)" aria-label="Description" />
+              <button class="btn btn-primary">Create entity</button>
+            </form>
+            <form id="ent-search" class="toolbar">
+              <input id="ent-q" class="path-input" placeholder="Search by name, e.g. APT" aria-label="Search entities" />
+              <select id="ent-filter" class="select" aria-label="Filter by type">
+                <option value="">All types</option>
+                <option>ThreatActor</option><option>Campaign</option><option>Malware</option>
+                <option>Technique</option><option>Tactic</option><option>Mitigation</option>
+              </select>
+              <button class="btn">Search</button>
+            </form>
+            <p id="ent-status" class="hint" role="status"></p>
+            <div id="ent-list" class="table-wrap"></div>
+          </div>
+          <div class="admin-side">
+            <div class="panel admin-card">
+              <div class="insight-head">
+                <h3>Users</h3>
+                <p class="hint">Register analysts and change roles. Passwords are stored only as bcrypt hashes.</p>
+              </div>
+              <form id="user-create" class="form-grid">
+                <input id="user-email" type="email" placeholder="Email" required aria-label="Email" />
+                <input id="user-name" placeholder="Name" aria-label="Name" />
+                <input id="user-pass" type="password" placeholder="Password (8+ characters)" required minlength="8" aria-label="Password" autocomplete="new-password" />
+                <select id="user-role-new" class="select" aria-label="Role"><option value="analyst">analyst</option><option value="admin">admin</option></select>
+                <button class="btn btn-primary">Register user</button>
+              </form>
+              <p id="user-status" class="hint" role="status"></p>
+              <div id="user-list" class="table-wrap"></div>
+            </div>
+            <div class="panel admin-card">
+              <div class="insight-head">
+                <h3>Data health</h3>
+                <p class="hint">Checks that every mitreId / cveId exists in both MongoDB and Neo4j (same check as <code>npm run reconcile</code>).</p>
+              </div>
+              <button id="health-run" class="btn">Run consistency check</button>
+              <div id="health-out" class="health-out"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="page-reports" class="view">
         <div class="charts-grid">
           <div class="chart-card panel">
-            <h3>CVE severity by month</h3>
-            <canvas id="chart-sev-month"></canvas>
+            <h3>CVE volume by year and severity</h3>
+            <p class="chart-sub hint" id="sub-sev-year"></p>
+            <div class="chart-legend" id="legend-sev-year"></div>
+            <div class="chart-box"><canvas id="chart-sev-year" role="img" aria-label="Stacked bar chart of CVEs per year by severity"></canvas></div>
           </div>
           <div class="chart-card panel">
             <h3>Most-cited sources</h3>
-            <canvas id="chart-sources"></canvas>
+            <p class="chart-sub hint" id="sub-sources"></p>
+            <div id="sources-list" class="bar-list"></div>
           </div>
           <div class="chart-card panel">
-            <h3>Severity × known-exploited</h3>
-            <canvas id="chart-crosstab"></canvas>
+            <h3>Severity × known-exploited (CISA KEV)</h3>
+            <p class="chart-sub hint" id="sub-crosstab"></p>
+            <div id="crosstab-table" class="table-wrap"></div>
           </div>
           <div class="chart-card panel">
-            <h3>Chunks per entity (top)</h3>
+            <h3>Evidence chunks per entity (top)</h3>
+            <p class="chart-sub hint" id="sub-chunks"></p>
             <div id="chunks-entity-list" class="list"></div>
           </div>
         </div>
