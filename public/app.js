@@ -43,7 +43,7 @@ function initTheme() {
 }
 
 /* ============================ Router ============================ */
-const PAGES = ['login', 'graph', 'ask', 'reports'];
+const PAGES = ['login', 'graph', 'ask', 'insights', 'reports'];
 
 function currentRoute() {
   const r = (location.hash.replace(/^#\/?/, '') || 'graph').toLowerCase();
@@ -79,6 +79,7 @@ function renderRoute() {
       if (route === 'graph') layoutGraph();
       if (route === 'reports') loadReports();
       if (route === 'ask') loadAskModes();
+      if (route === 'insights') loadInsights();
     });
   }
 }
@@ -278,6 +279,7 @@ function simulate() {
       const sp = Math.hypot(n.vx, n.vy);
       if (sp > MAX_SPEED) { n.vx *= MAX_SPEED / sp; n.vy *= MAX_SPEED / sp; }
       if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) { n.x = 0; n.y = 0; n.vx = 0; n.vy = 0; }
+      if (n.pinned) { n.vx = 0; n.vy = 0; continue; } // attack-path nodes stay in their row
       n.x += n.vx; n.y += n.vy;
     }
   }
@@ -306,16 +308,21 @@ function layoutGraph() {
 
   ctx.clearRect(0, 0, W, H);
   const isLight = document.body.dataset.theme === 'light';
+  const path = state.graph.path;
+  const onPath = path ? new Set(path.keys) : null;
+  const accent = isLight ? '#4f46e5' : '#58a6ff';
   ctx.strokeStyle = isLight ? '#94a3b8' : '#404650';
-  ctx.globalAlpha = 0.5;
+  ctx.globalAlpha = path ? 0.18 : 0.5;
   ctx.lineWidth = 1;
   for (const e of visibleEdges) {
+    if (path && path.edgeKeys.has([e.a, e.b].sort().join('<>'))) continue; // drawn below
     const a = state.graph.nodes.get(e.a), b = state.graph.nodes.get(e.b);
     if (!a || !b) continue;
     const pa = w2s(a, scale, tx, ty), pb = w2s(b, scale, tx, ty);
     ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  if (path) drawPathEdges(ctx, path, scale, tx, ty, accent, isLight);
 
   const ordered = [...visibleNodes].sort((a, b) => degreeOf(b) - degreeOf(a));
   for (const n of ordered) {
@@ -323,6 +330,7 @@ function layoutGraph() {
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue; // never draw NaN
     if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) continue;
     const r = Math.max(7, 5 + Math.min(9, Math.sqrt(degreeOf(n)) * 2));
+    ctx.globalAlpha = onPath && !onPath.has(nodeKey(n)) ? 0.3 : 1;
     // halo
     ctx.beginPath();
     ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
@@ -343,12 +351,21 @@ function layoutGraph() {
       ctx.lineWidth = 2.5;
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+    if (onPath && onPath.has(nodeKey(n))) drawHopBadge(ctx, p, r, path.keys.indexOf(nodeKey(n)), accent);
   }
 
   // labels for the most-connected nodes
   ctx.font = '11px -apple-system, sans-serif';
-  for (const n of ordered.slice(0, 26)) {
+  // with a path shown, label only the path (plus whatever is hovered) to keep the chain readable
+  const labelled = path
+    ? [...ordered.filter((n) => hoverNode && nodeKey(n) === nodeKey(hoverNode) && !onPath.has(nodeKey(n))), ...ordered.filter((n) => onPath.has(nodeKey(n)))]
+    : ordered.slice(0, 26);
+  for (const n of labelled) {
     const p = w2s(n, scale, tx, ty);
+    const isPathNode = onPath && onPath.has(nodeKey(n));
+    ctx.globalAlpha = onPath && !isPathNode ? 0.55 : 1;
+    ctx.font = isPathNode ? '600 12px -apple-system, sans-serif' : '11px -apple-system, sans-serif';
     if (p.x < -60 || p.x > W + 60 || p.y < -20 || p.y > H + 20) continue;
     const r = Math.max(7, 5 + Math.min(9, Math.sqrt(degreeOf(n)) * 2));
     const w = ctx.measureText(n.name).width;
@@ -358,6 +375,50 @@ function layoutGraph() {
     ctx.fillStyle = isLight ? '#0f172a' : '#e6edf3';
     ctx.fillText(n.name, p.x - w / 2, p.y - 12);
   }
+  ctx.globalAlpha = 1;
+}
+
+/** Thick directional edges along the attack path, with arrowheads and relationship labels. */
+function drawPathEdges(ctx, path, scale, tx, ty, accent, isLight) {
+  path.hops.forEach((h) => {
+    const src = state.graph.nodes.get(h.forward ? h.from : h.to);
+    const dst = state.graph.nodes.get(h.forward ? h.to : h.from);
+    if (!src || !dst) return;
+    const a = w2s(src, scale, tx, ty), b = w2s(dst, scale, tx, ty);
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const rDst = Math.max(7, 5 + Math.min(9, Math.sqrt(degreeOf(dst)) * 2)) + 6;
+    const ex = b.x - Math.cos(ang) * rDst, ey = b.y - Math.sin(ang) * rDst;
+    ctx.strokeStyle = accent;
+    ctx.fillStyle = accent;
+    ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - Math.cos(ang - 0.45) * 13, ey - Math.sin(ang - 0.45) * 13);
+    ctx.lineTo(ex - Math.cos(ang + 0.45) * 13, ey - Math.sin(ang + 0.45) * 13);
+    ctx.closePath(); ctx.fill();
+    // relationship label at the midpoint
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    ctx.font = '600 10px ui-monospace, SFMono-Regular, Menlo, monospace';
+    const w = ctx.measureText(h.type).width;
+    ctx.fillStyle = isLight ? '#eef2ff' : '#1c2a40';
+    ctx.fillRect(mx - w / 2 - 5, my + 6, w + 10, 15);
+    ctx.fillStyle = accent;
+    ctx.fillText(h.type, mx - w / 2, my + 17);
+  });
+}
+
+function drawHopBadge(ctx, p, r, i, accent) {
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r + 5, 0, Math.PI * 2);
+  ctx.strokeStyle = accent; ctx.lineWidth = 2.5; ctx.stroke();
+  const bx = p.x + r + 4, by = p.y + r + 2;
+  ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2);
+  ctx.fillStyle = accent; ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 10px -apple-system, sans-serif';
+  const t = String(i + 1);
+  ctx.fillText(t, bx - ctx.measureText(t).width / 2, by + 3.5);
 }
 
 /* ---- canvas events: hover, drag-pan, wheel-zoom, click-expand ---- */
@@ -421,6 +482,7 @@ canvas.addEventListener('wheel', (e) => {
 $('#graph-label-filter').addEventListener('change', layoutGraph);
 $('#graph-reset').addEventListener('click', () => {
   state.graph = { nodes: new Map(), edges: new Map(), view: { scale: 1, tx: 0, ty: 0 } };
+  clearPathUi();
   $('#node-detail').hidden = true;
   updateGraphEmpty();
   layoutGraph();
@@ -438,6 +500,7 @@ $('#graph-search-btn').addEventListener('click', async () => {
     if (!picks.length) { $('#graph-status').textContent = `No matches for “${q}”`; return; }
     const p = picks[0];
     state.graph = { nodes: new Map(), edges: new Map(), view: { scale: 1, tx: 0, ty: 0 } };
+    clearPathUi();
     $('#node-detail').hidden = true;
     const me = addNode(p.label || 'ThreatActor', p.mitreId, p.name);
     state.graph.nodes.set(nodeKey(me), me);
@@ -458,6 +521,105 @@ function fitAfterLayout() {
 $('#graph-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#graph-search-btn').click(); });
 
 window.addEventListener('resize', layoutGraph);
+
+/* ---- attack path: shortest path rendered as a pinned, directional chain ---- */
+const PATH_CONTEXT_PER_HOP = 6; // faded neighbours per hop, for context
+
+function clearPathUi() {
+  if (state.graph) state.graph.path = null;
+  $('#path-steps').classList.add('hidden');
+  $('#path-steps').innerHTML = '';
+  $('#path-clear').classList.add('hidden');
+}
+
+async function showAttackPath() {
+  const from = $('#path-from').value.trim();
+  const to = $('#path-to').value.trim();
+  if (!from || !to) { $('#graph-status').textContent = 'Enter a software name and a threat actor.'; return; }
+  const btn = $('#path-btn');
+  btn.disabled = true;
+  btn.textContent = 'Finding path…';
+  $('#graph-status').textContent = '';
+  try {
+    const sp = await api(`/api/algorithms/shortest-path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    if (!sp.found) { $('#graph-status').textContent = `No path between ${from} and ${to}.`; return; }
+
+    state.graph = { nodes: new Map(), edges: new Map(), view: { scale: 1, tx: 0, ty: 0 } };
+    $('#node-detail').hidden = true;
+    const n = sp.path.length;
+    const nodes = sp.path.map((p, i) => {
+      const node = addNode(p.label, p.key, p.name);
+      node.x = (i - (n - 1) / 2) * 200;
+      node.y = 0;
+      node.pinned = true;
+      return node;
+    });
+    const hops = sp.rels.map((r, i) => {
+      addEdge(nodes[i], nodes[i + 1], r.type, r.forward ? 'out' : 'in');
+      return { from: nodeKey(nodes[i]), to: nodeKey(nodes[i + 1]), type: r.type, forward: r.forward };
+    });
+
+    // context: a few neighbours of every hop, fanned out in rows above/below it so they
+    // never land on the path line (placed, not simulated)
+    const keys = new Set(nodes.map(nodeKey));
+    const neighbourLists = await Promise.all(nodes.map((nd) =>
+      api(`/api/graph/${encodeURIComponent(nd.label)}/${encodeURIComponent(nd.key)}/neighbors`).catch(() => ({ neighbors: [] }))));
+    neighbourLists.forEach((body, i) => {
+      let added = 0;
+      for (const nb of body.neighbors) {
+        if (added >= PATH_CONTEXT_PER_HOP) break;
+        const k = nodeKey(nb);
+        if (keys.has(k)) continue;
+        const side = added % 2 ? 1 : -1;
+        const slot = Math.floor(added / 2); // 0,1,2 per side
+        const ctxNode = addNode(nb.label, nb.key, nb.name);
+        ctxNode.x = nodes[i].x + (slot - 1) * 55;
+        ctxNode.y = side * (115 + (slot % 2) * 45);
+        ctxNode.pinned = true;
+        keys.add(k);
+        addEdge(nodes[i], ctxNode, nb.rel, nb.direction);
+        added++;
+      }
+    });
+
+    state.graph.path = { keys: nodes.map(nodeKey), hops, edgeKeys: new Set(hops.map((h) => [h.from, h.to].sort().join('<>'))) };
+    updateGraphEmpty();
+    fitAfterLayout();
+    renderPathSteps(sp, hops);
+  } catch (err) {
+    $('#graph-status').textContent = err.message;
+    console.error('[attackPath]', err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Show attack path';
+  }
+}
+
+function renderPathSteps(sp, hops) {
+  let html = `<span class="path-summary">${sp.hops} hops · ${sp.latencyMs} ms</span>`;
+  sp.path.forEach((p, i) => {
+    html += `<span class="path-node"><b>${i + 1}</b><i class="dot" style="background:${COLORS[p.label] || '#888'}"></i>${escapeHtml(p.name)}</span>`;
+    if (hops[i]) html += `<span class="path-rel">${hops[i].forward ? '' : '←'}${escapeHtml(hops[i].type)}${hops[i].forward ? '→' : ''}</span>`;
+  });
+  $('#path-steps').innerHTML = html;
+  $('#path-steps').classList.remove('hidden');
+  $('#path-clear').classList.remove('hidden');
+}
+
+$('#path-btn').addEventListener('click', showAttackPath);
+['#path-from', '#path-to'].forEach((sel) => $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') showAttackPath(); }));
+$('#path-clear').addEventListener('click', () => {
+  for (const n of state.graph.nodes.values()) n.pinned = false;
+  clearPathUi();
+  layoutGraph();
+});
+
+/** Open an entity in the Graph page (used by the Insights page). */
+function openInGraph(name) {
+  $('#graph-search').value = name;
+  navigate('graph');
+  setTimeout(() => $('#graph-search-btn').click(), 50);
+}
 
 /* ============================ Ask page ============================ */
 $('#ask-btn').addEventListener('click', askQuestion);
@@ -561,6 +723,100 @@ function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function escapeAttr(s) { return escapeHtml(s); }
+
+/* ============================ Insights page ============================ */
+function barRows(items, { value, max, label, sub, right, onClick }) {
+  if (!items.length) return '<p class="hint list-empty">No results.</p>';
+  const top = max || Math.max(...items.map(value), 1);
+  return items.map((it, i) => `
+    <div class="bar-row${onClick ? ' clickable' : ''}" data-i="${i}" ${onClick ? 'role="button" tabindex="0"' : ''}>
+      <div class="bar-text"><span class="bar-label">${escapeHtml(label(it))}</span><span class="bar-value">${escapeHtml(right(it))}</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, (value(it) / top) * 100).toFixed(1)}%"></div></div>
+      ${sub ? `<div class="bar-sub">${escapeHtml(sub(it))}</div>` : ''}
+    </div>`).join('');
+}
+
+function wireBarClicks(container, items, onClick) {
+  container.querySelectorAll('.bar-row.clickable').forEach((row) => {
+    const go = () => onClick(items[Number(row.dataset.i)]);
+    row.addEventListener('click', go);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
+}
+
+async function loadCriticality() {
+  const box = $('#crit-list');
+  box.innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const body = await api('/api/algorithms/technique-criticality');
+    const items = body.techniques.slice(0, 12);
+    box.innerHTML = barRows(items, {
+      value: (t) => t.criticality,
+      label: (t) => `${t.name} (${t.mitreId})`,
+      right: (t) => String(t.criticality),
+      sub: (t) => `${t.malwareCount} malware · ${t.actorCount} actors`,
+      onClick: true,
+    });
+    wireBarClicks(box, items, (t) => openInGraph(t.mitreId));
+  } catch (err) {
+    box.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function loadSimilar() {
+  const actor = $('#sim-actor').value.trim();
+  const box = $('#sim-list');
+  if (!actor) { box.innerHTML = '<p class="hint">Enter a threat actor name or ID.</p>'; return; }
+  box.innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const body = await api(`/api/algorithms/similar-actors?actor=${encodeURIComponent(actor)}`);
+    if (!body.similar.length) { box.innerHTML = `<p class="hint">No threat actor named “${escapeHtml(actor)}” with known techniques.</p>`; return; }
+    const head = `<p class="hint list-meta">${escapeHtml(body.actorName)} performs ${body.actorTechniques} techniques · ${body.latencyMs} ms</p>`;
+    box.innerHTML = head + barRows(body.similar, {
+      value: (a) => a.jaccard,
+      max: 1,
+      label: (a) => `${a.name} (${a.mitreId})`,
+      right: (a) => `${(a.jaccard * 100).toFixed(0)}%`,
+      sub: (a) => `${a.sharedTechniques} shared of ${a.techniqueCount} techniques`,
+      onClick: true,
+    });
+    wireBarClicks(box, body.similar, (a) => openInGraph(a.name));
+  } catch (err) {
+    box.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function loadMitigations() {
+  const actor = $('#mit-actor').value.trim();
+  const box = $('#mit-list');
+  box.innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const body = await api(`/api/algorithms/mitigation-priorities${actor ? `?actor=${encodeURIComponent(actor)}` : ''}`);
+    const scope = body.actor ? `${escapeHtml(body.actor.name)}'s techniques` : 'the 50 most-used techniques';
+    const total = body.mitigations[0] ? body.mitigations[0].total : 0;
+    const head = `<p class="hint list-meta">Coverage of ${scope}${total ? ` (${total})` : ''} · ${body.latencyMs} ms</p>`;
+    box.innerHTML = head + barRows(body.mitigations, {
+      value: (m) => m.score,
+      label: (m) => `${m.name} (${m.mitreId})`,
+      right: (m) => `${m.coverage}/${m.total}`,
+      sub: (m) => `e.g. ${m.examples.slice(0, 3).join(', ')}`,
+    });
+  } catch (err) {
+    box.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+let insightsLoaded = false;
+function loadInsights() {
+  if (insightsLoaded) return;
+  insightsLoaded = true;
+  loadCriticality();
+  loadSimilar();
+  loadMitigations();
+}
+
+$('#sim-form').addEventListener('submit', (e) => { e.preventDefault(); loadSimilar(); });
+$('#mit-form').addEventListener('submit', (e) => { e.preventDefault(); loadMitigations(); });
 
 /* ============================ Reports page ============================ */
 function drawBars(canvas, items, { label = (r) => r._id, value = (r) => r.count, color = '#4f46e5', rotate = false }) {

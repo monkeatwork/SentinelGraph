@@ -44,6 +44,7 @@
       <nav class="app-nav">
         <a href="#/graph" data-nav="graph" class="nav-link">Graph</a>
         <a href="#/ask" data-nav="ask" class="nav-link">Ask</a>
+        <a href="#/insights" data-nav="insights" class="nav-link">Insights</a>
         <a href="#/reports" data-nav="reports" class="nav-link">Reports</a>
       </nav>
       <div class="user-box">
@@ -68,6 +69,15 @@
           <button id="graph-reset" class="btn btn-ghost">Reset</button>
           <span class="hint" id="graph-status"></span>
         </div>
+        <div class="toolbar path-bar">
+          <span class="toolbar-label">Attack path</span>
+          <input id="path-from" class="path-input" value="log4j" placeholder="Software, e.g. log4j" aria-label="From software" />
+          <span class="path-arrow" aria-hidden="true">→</span>
+          <input id="path-to" class="path-input" value="APT29" placeholder="Threat actor, e.g. APT29" aria-label="To threat actor" />
+          <button id="path-btn" class="btn btn-primary">Show attack path</button>
+          <button id="path-clear" class="btn btn-ghost hidden">Clear path</button>
+        </div>
+        <div id="path-steps" class="path-steps hidden"></div>
         <div class="legend">
           <span class="lg lg-ThreatActor">ThreatActor</span><span class="lg lg-Campaign">Campaign</span>
           <span class="lg lg-Malware">Malware</span><span class="lg lg-Technique">Technique</span>
@@ -117,6 +127,41 @@
       </section>
 
       <!-- REPORTS PAGE -->
+      <!-- INSIGHTS PAGE -->
+      <section id="page-insights" class="view">
+        <div class="insights-grid">
+          <div class="panel insight-card">
+            <div class="insight-head">
+              <h3>Most critical techniques</h3>
+              <p class="hint">Degree centrality: how many malware families use a technique plus how many threat actors perform it.</p>
+            </div>
+            <div id="crit-list" class="bar-list"></div>
+          </div>
+          <div class="panel insight-card">
+            <div class="insight-head">
+              <h3>Similar threat actors</h3>
+              <p class="hint">Recommendation by Jaccard similarity on shared techniques. Click a group to open it in the graph.</p>
+              <form id="sim-form" class="toolbar">
+                <input id="sim-actor" class="path-input" value="APT29" placeholder="Threat actor, e.g. APT29" aria-label="Threat actor" />
+                <button class="btn btn-primary">Find similar</button>
+              </form>
+            </div>
+            <div id="sim-list" class="bar-list"></div>
+          </div>
+          <div class="panel insight-card">
+            <div class="insight-head">
+              <h3>Recommended mitigations</h3>
+              <p class="hint">Mitigations ranked by how many of the actor's techniques they cover. Leave blank for the most-used techniques overall.</p>
+              <form id="mit-form" class="toolbar">
+                <input id="mit-actor" class="path-input" value="APT29" placeholder="Threat actor (blank = all)" aria-label="Threat actor for mitigations" />
+                <button class="btn btn-primary">Recommend</button>
+              </form>
+            </div>
+            <div id="mit-list" class="bar-list"></div>
+          </div>
+        </div>
+      </section>
+
       <section id="page-reports" class="view">
         <div class="charts-grid">
           <div class="chart-card panel">
