@@ -78,6 +78,7 @@ function renderRoute() {
     requestAnimationFrame(() => {
       if (route === 'graph') layoutGraph();
       if (route === 'reports') loadReports();
+      if (route === 'ask') loadAskModes();
     });
   }
 }
@@ -464,28 +465,68 @@ $('#ask-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) askQuestion();
 });
 
+let askModesLoaded = false;
+async function loadAskModes() {
+  if (askModesLoaded) return;
+  try {
+    const m = await api('/api/qa/modes');
+    const opt = $('#ask-mode option[value="llm"]');
+    opt.disabled = !m.llm.available;
+    opt.textContent = m.llm.available ? `LLM answer (${m.llm.provider})` : 'LLM answer (not configured)';
+    askModesLoaded = true;
+  } catch (e) { /* toggle keeps defaults; template mode always works */ }
+}
+
+const linkify = (escaped) => escaped.replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+
+function pathHtml(p) {
+  let html = `<span class="path-node">${escapeHtml(p.nodes[0].name)}</span>`;
+  p.rels.forEach((r, i) => {
+    const forward = r.from === p.nodes[i].key;
+    html += `<span class="path-rel">${forward ? '' : '←'}${escapeHtml(r.type)}${forward ? '→' : ''}</span>`;
+    html += `<span class="path-node">${escapeHtml(p.nodes[i + 1].name)}</span>`;
+  });
+  return `<div class="path-row">${html}</div>`;
+}
+
 async function askQuestion() {
   const question = $('#ask-input').value.trim();
   if (!question) return;
-  const result = $('#ask-result');
-  const empty = $('#ask-empty');
-  empty.classList.add('hidden');
-  result.innerHTML = '<p class="hint">Thinking…</p>';
+  const out = $('#ask-output');
+  const btn = $('#ask-btn');
+  const mode = $('#ask-mode').value;
+  $('#ask-empty').classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'Asking…';
+  $('#ask-latency').textContent = '';
+  out.innerHTML = `<p class="hint">${mode === 'llm' ? 'Retrieving evidence and asking the LLM…' : 'Retrieving evidence…'}</p>`;
   try {
     const body = await api('/api/qa/ask', {
       method: 'POST',
-      body: JSON.stringify({ question, depth: Number($('#ask-depth').value) || 2 }),
+      body: JSON.stringify({ question, depth: Number($('#ask-depth').value) || 2, mode }),
     });
-    const { answer, resolved, evidence, latencyMs } = body;
+    const { answer, resolved, evidence, latencyMs, answerMode, llm, attackPaths } = body;
 
-    let html = '<div class="resolved-pills">';
+    let badge;
+    if (answerMode === 'llm') badge = `<span class="mode-badge mode-llm">LLM · ${escapeHtml(llm.model)}</span>`;
+    else if (llm && llm.fallbackReason) badge = `<span class="mode-badge mode-fallback" title="${escapeAttr(llm.fallbackReason)}">Template · LLM unavailable, fell back</span>`;
+    else badge = '<span class="mode-badge">Template</span>';
+
+    let html = `<div class="answer-head">${badge}<div class="resolved-pills">`;
     if (resolved.names.length) {
-      html += resolved.names.map((n) => `<span class="pill-entity">${escapeHtml(n.label)} · ${escapeHtml(n.name)}</span>`).join('');
+      const pills = [...new Set(resolved.names.map((n) => `${n.label} · ${n.name}`))]; // CPE versions share a name
+      html += pills.map((p) => `<span class="pill-entity">${escapeHtml(p)}</span>`).join('');
     } else {
       html += '<span class="pill-entity">no entities resolved</span>';
     }
-    html += '</div>';
-    html += `<div class="ask-answer">${escapeHtml(answer)}</div>`;
+    html += '</div></div>';
+    html += `<div class="ask-answer">${linkify(escapeHtml(answer))}</div>`;
+
+    if (attackPaths && attackPaths.length) {
+      html += '<div class="evidence"><h4>Graph paths given to the LLM</h4>';
+      html += attackPaths.map(pathHtml).join('');
+      html += '</div>';
+    }
 
     if (evidence && evidence.length) {
       html += '<div class="evidence"><h4>Evidence chunks</h4>';
@@ -501,11 +542,14 @@ async function askQuestion() {
       }
       html += '</div>';
     }
-    result.innerHTML = html;
+    out.innerHTML = html;
     $('#ask-latency').textContent =
       `resolve ${latencyMs.resolve} ms · graph ${latencyMs.graph} ms · vector ${latencyMs.vector} ms · synthesis ${latencyMs.synthesis} ms · total ${latencyMs.total} ms`;
   } catch (err) {
-    result.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+    out.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ask';
   }
 }
 

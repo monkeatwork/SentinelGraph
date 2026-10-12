@@ -93,7 +93,11 @@
         <div class="ask-box panel">
           <textarea id="ask-input" rows="2" placeholder="Ask a question — e.g. Which adversary groups exploit Log4j, and how?">Which adversary groups exploit Log4j, and how?</textarea>
           <div class="ask-actions">
-            <select id="ask-depth" class="select">
+            <select id="ask-mode" class="select" title="How the answer is written">
+              <option value="template" selected>Template answer</option>
+              <option value="llm">LLM answer (Gemini)</option>
+            </select>
+            <select id="ask-depth" class="select" title="Graph traversal depth">
               <option value="1">depth 1</option>
               <option value="2" selected>depth 2</option>
               <option value="3">depth 3</option>
@@ -102,11 +106,13 @@
           </div>
         </div>
         <div id="ask-latency" class="hint"></div>
-        <div id="ask-result" class="panel ask-result hidden">
+        <div id="ask-result" class="panel ask-result">
           <div id="ask-empty" class="empty-state">
             <div class="empty-icon">❓</div>
             <p>Ask a question and get a cited answer built from the graph + evidence reports.</p>
+            <p class="hint">Template mode works offline; LLM mode writes the answer with Gemini from the same evidence.</p>
           </div>
+          <div id="ask-output"></div>
         </div>
       </section>
 

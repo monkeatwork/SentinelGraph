@@ -269,7 +269,19 @@ textarea { resize: vertical; min-height: 56px; }
 .ask-box textarea { flex: 1; }
 .ask-actions { display: flex; gap: 8px; align-items: center; }
 .ask-result { flex: 1; min-height: 0; overflow: auto; padding: 18px 20px; position: relative; }
-.ask-answer { white-space: pre-wrap; line-height: 1.6; }
+.ask-answer { white-space: pre-wrap; line-height: 1.6; overflow-wrap: anywhere; }
+.ask-answer a { color: var(--accent); }
+.answer-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.answer-head .resolved-pills { margin: 0; }
+.mode-badge {
+  font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--muted); background: var(--panel-2);
+}
+.mode-llm { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.mode-fallback { color: var(--danger); border-color: var(--danger); cursor: help; }
+.path-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0; font-size: 13px; }
+.path-node { padding: 2px 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--border); }
+.path-rel { color: var(--muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .resolved-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .pill-entity {
   background: var(--accent-soft);
