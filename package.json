@@ -14,7 +14,8 @@
     "seed:software": "node src/scripts/seedSoftware.js",
     "seed:users": "node src/scripts/seedUsers.js",
     "seed:reports": "node src/scripts/seedReports.js",
-    "demo": "node src/scripts/demoQueries.js"
+    "demo": "node src/scripts/demoQueries.js",
+    "reconcile": "node src/scripts/reconcile.js"
   },
   "jest": {
     "setupFiles": ["<rootDir>/jest.setup.js"],

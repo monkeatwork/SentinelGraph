@@ -3,6 +3,7 @@ const request = require('supertest');
 const app = require('../src/server');
 const { ensureTestUsers, login } = require('./helpers');
 const { getDriver } = require('../src/config/neo4j');
+const { getDb } = require('../src/config/mongo');
 
 let adminToken;
 let analystToken;
@@ -20,6 +21,8 @@ const clean = async (label, keyProp, key) => {
   } finally {
     await s.close();
   }
+  // POST /api/graph mirrors entity labels into Mongo, so clean that side too
+  if (keyProp === 'mitreId') await (await getDb()).collection('entities').deleteOne({ mitreId: key });
 };
 
 describe('Graph CRUD + role restrictions', () => {
