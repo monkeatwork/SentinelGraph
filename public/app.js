@@ -508,7 +508,11 @@ async function askQuestion() {
     const { answer, resolved, evidence, latencyMs, answerMode, llm, attackPaths } = body;
 
     let badge;
-    if (answerMode === 'llm') badge = `<span class="mode-badge mode-llm">LLM · ${escapeHtml(llm.model)}</span>`;
+    if (answerMode === 'llm') {
+      const via = llm.via && llm.via !== 'primary' ? ` · ${escapeHtml(llm.via)}` : '';
+      const tokens = llm.usage ? `${llm.usage.input} in / ${llm.usage.output} out tokens` : '';
+      badge = `<span class="mode-badge mode-llm" title="${escapeAttr(tokens)}">LLM · ${escapeHtml(llm.model)}${via}</span>`;
+    }
     else if (llm && llm.fallbackReason) badge = `<span class="mode-badge mode-fallback" title="${escapeAttr(llm.fallbackReason)}">Template · LLM unavailable, fell back</span>`;
     else badge = '<span class="mode-badge">Template</span>';
 

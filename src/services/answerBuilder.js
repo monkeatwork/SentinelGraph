@@ -148,6 +148,9 @@ async function buildLlmAnswer(input) {
     citedReportIds: [...new Set(cited.map((s) => s.report._id.toString()))],
     provider: out.provider,
     model: out.model,
+    usage: out.usage,
+    via: out.via,
+    attempts: out.attempts,
   };
 }
 

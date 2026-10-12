@@ -130,7 +130,13 @@ router.get('/modes', requireAuth, (req, res) => {
   res.json({
     default: 'template',
     modes: MODES,
-    llm: { available: llm.isConfigured(), provider: c.provider, models: c.models },
+    llm: {
+      available: llm.isConfigured(),
+      provider: c.provider,
+      models: c.models,
+      fallback: c.fallback,
+      targets: c.targets.length, // key x model combinations tried in order
+    },
   });
 });
 
@@ -192,7 +198,7 @@ router.post('/ask', requireAuth, async (req, res, next) => {
         answer = out.text;
         answerMode = 'llm';
         citedReportIds = out.citedReportIds.map((id) => ObjectId.createFromHexString(id));
-        llmInfo = { provider: out.provider, model: out.model };
+        llmInfo = { provider: out.provider, model: out.model, via: out.via, attempts: out.attempts, usage: out.usage };
       } catch (e) {
         llmInfo = { fallbackReason: e.message };
       }
