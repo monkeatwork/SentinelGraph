@@ -302,6 +302,21 @@ textarea { resize: vertical; min-height: 56px; }
 .bar-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- ask page ---------- */
+.saved-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 30px; }
+.saved-list { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.saved-chip {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--panel);
+  overflow: hidden; max-width: 100%;
+}
+.saved-chip button { border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.saved-run { display: inline-flex; align-items: baseline; min-width: 0; padding: 4px 6px 4px 12px; font-size: 12.5px; white-space: nowrap; }
+.saved-name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.saved-run small { color: var(--muted); margin-left: 6px; font-size: 11px; flex: none; }
+.saved-run:hover { color: var(--accent); }
+.saved-del { padding: 0 10px; color: var(--muted); font-size: 15px; border-left: 1px solid var(--border) !important; }
+.saved-del:hover { color: var(--danger); background: var(--panel-2); }
+.error-text { color: var(--danger); }
 .ask-box { display: flex; gap: 12px; padding: 14px; align-items: flex-end; }
 .ask-box textarea { flex: 1; }
 .ask-actions { display: flex; gap: 8px; align-items: center; }

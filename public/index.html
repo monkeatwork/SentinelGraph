@@ -112,8 +112,14 @@
               <option value="2" selected>depth 2</option>
               <option value="3">depth 3</option>
             </select>
+            <button id="ask-save" class="btn" title="Save this question with its depth and mode">☆ Save</button>
             <button id="ask-btn" class="btn btn-primary">Ask</button>
           </div>
+        </div>
+        <div class="saved-bar">
+          <span class="toolbar-label">Saved</span>
+          <div id="saved-list" class="saved-list"><span class="hint">Loading…</span></div>
+          <span id="saved-status" class="hint" role="status"></span>
         </div>
         <div id="ask-latency" class="hint"></div>
         <div id="ask-result" class="panel ask-result">

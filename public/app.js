@@ -78,7 +78,7 @@ function renderRoute() {
     requestAnimationFrame(() => {
       if (route === 'graph') layoutGraph();
       if (route === 'reports') loadReports();
-      if (route === 'ask') loadAskModes();
+      if (route === 'ask') { loadAskModes(); loadSavedQueries(); }
       if (route === 'insights') loadInsights();
     });
   }
@@ -719,6 +719,81 @@ async function askQuestion() {
   }
 }
 
+/* ---- saved queries ---- */
+let savedQueries = [];
+
+function savedStatus(msg, isError = false) {
+  const el = $('#saved-status');
+  el.textContent = msg;
+  el.classList.toggle('error-text', isError);
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 3500);
+}
+
+function renderSavedQueries() {
+  const box = $('#saved-list');
+  if (!savedQueries.length) {
+    box.innerHTML = '<span class="hint">No saved questions yet. Click ☆ Save to keep one.</span>';
+    return;
+  }
+  box.innerHTML = savedQueries.map((q, i) => `
+    <span class="saved-chip" data-i="${i}">
+      <button class="saved-run" title="${escapeAttr(q.question)} (depth ${q.depth}, ${q.mode})">
+        <span class="saved-name">${escapeHtml(q.name)}</span><small>${q.mode === 'llm' ? 'LLM' : 'template'} · d${q.depth}</small>
+      </button>
+      <button class="saved-del" title="Delete saved question" aria-label="Delete saved question ${escapeAttr(q.name)}">×</button>
+    </span>`).join('');
+  box.querySelectorAll('.saved-chip').forEach((chip) => {
+    const q = savedQueries[Number(chip.dataset.i)];
+    chip.querySelector('.saved-run').addEventListener('click', () => runSavedQuery(q));
+    chip.querySelector('.saved-del').addEventListener('click', () => deleteSavedQuery(q));
+  });
+}
+
+async function loadSavedQueries() {
+  try {
+    const body = await api('/api/users/me/saved-queries');
+    savedQueries = body.savedQueries;
+    renderSavedQueries();
+  } catch (err) {
+    $('#saved-list').innerHTML = `<span class="error-text">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+function runSavedQuery(q) {
+  $('#ask-input').value = q.question;
+  $('#ask-depth').value = String(q.depth);
+  const llmOpt = $('#ask-mode option[value="llm"]');
+  $('#ask-mode').value = q.mode === 'llm' && !llmOpt.disabled ? 'llm' : 'template';
+  askQuestion();
+}
+
+async function deleteSavedQuery(q) {
+  try {
+    await api(`/api/users/me/saved-queries/${encodeURIComponent(q._id)}`, { method: 'DELETE' });
+    savedQueries = savedQueries.filter((x) => x._id !== q._id);
+    renderSavedQueries();
+    savedStatus('Deleted.');
+  } catch (err) {
+    savedStatus(err.message, true);
+  }
+}
+
+$('#ask-save').addEventListener('click', async () => {
+  const question = $('#ask-input').value.trim();
+  if (!question) { savedStatus('Type a question first.', true); return; }
+  try {
+    const body = await api('/api/users/me/saved-queries', {
+      method: 'POST',
+      body: JSON.stringify({ question, depth: Number($('#ask-depth').value) || 2, mode: $('#ask-mode').value }),
+    });
+    savedQueries = [body.savedQuery, ...savedQueries];
+    renderSavedQueries();
+    savedStatus('Saved.');
+  } catch (err) {
+    savedStatus(err.message, true);
+  }
+});
+
 function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -904,7 +979,7 @@ initTheme();
 
 if (state.token && state.user) {
   showUser();
-  navigate('graph');
+  navigate(currentRoute()); // a reload keeps the page you were on
 } else {
   navigate('login');
 }
