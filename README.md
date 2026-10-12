@@ -65,6 +65,7 @@ npm run seed:reports            # curated advisories + entity profiles + NVD adv
 
 npm start                       # API + dashboard on http://localhost:3000
 npm run demo                    # the end-to-end Review 2 demo runner
+npm run reconcile               # cross-store drift report: mitreId/cveId missing in either store
 npm test                        # jest + supertest (DBs must be running)
 ```
 
@@ -101,8 +102,11 @@ Embeddings: `@huggingface/transformers` all-MiniLM-L6-v2 (384-d) with an offline
 | POST/GET/PUT/DELETE | `/api/reports` (…`/:id`) | writes: admin | report CRUD; POST/PUT trigger chunk+embed pipeline |
 | GET / POST/PUT/DELETE | `/api/vulnerabilities` | writes: admin | CVE records, severity/date/KEV filters |
 | GET / PATCH | `/api/users` · `/api/users/:id/role` | admin | user admin |
-| POST | `/api/qa/ask` | any | resolve → Cypher traversal (depth) → vector retrieval → cited template answer; logs to queryLogs (FR13) |
-| GET | `/api/algorithms/shortest-path` · `technique-criticality` · `similar-actors` | any | FR9/FR10 |
+| GET / POST / DELETE | `/api/users/me/saved-queries` (…`/:id`) | any | the caller's saved questions (embedded in their user doc, max 25) |
+| POST | `/api/qa/ask` | any | resolve → Cypher traversal (depth) → vector retrieval → cited answer; `mode: "template"` (default) or `"llm"`; logs to queryLogs (FR13) |
+| GET | `/api/qa/modes` | any | available answer modes + LLM configuration (no keys) |
+| GET | `/api/algorithms/shortest-path` · `technique-criticality` · `similar-actors` · `mitigation-priorities` | any | FR9/FR10; shortest path returns typed, directed hops |
+| GET | `/api/admin/reconcile` | admin | same drift report as `npm run reconcile` |
 | GET | `/api/analytics/*` (5 pipelines) | any | severity-by-month, most-cited sources, per-user volume, chunks-per-entity, severity×KEV cross-tab |
 | GET | `/health` | public | DB health |
 
@@ -131,3 +135,17 @@ docs/demo-notes.md            # exact Review 2 demo script
 - **CRUD:** graph + document round-trips through one REST API; role-restricted writes; 409 on duplicate keys; DETACH deletes; mirrored writes between stores.
 - **Advanced NoSQL:** entity-filtered vector retrieval, configurable-depth Cypher traversal, shortest path, degree-centrality, Jaccard similarity, 5 aggregation pipelines, 8+ indexes incl. text/compound/multikey/unique, idempotent ingestion (proved by re-run diffs).
 - **Deliverables:** repo, `npm run demo`, `docs/demo-notes.md`, README.
+
+## Review 3 additions
+
+- **LLM answer mode** (`src/services/llm.js`, `answerBuilder.js`): Gemini over REST, grounded in
+  the traversed attack paths, graph mitigations and numbered evidence chunks; answers must cite
+  `[n]` sources or the template answer is used instead. Configure in `.env` (see `.env.example`):
+  `LLM_API_KEY` (comma-separated keys allowed), `LLM_MODEL` fallback chain, optional
+  `LLM_FALLBACK_PROVIDER` (`groq` / `openrouter`). Template mode stays the default.
+- **Dashboard**: attack-path view on the Graph page, Insights page (criticality, similar actors,
+  mitigation priorities), saved queries on Ask, reworked Reports, admin-only Admin page
+  (entity CRUD, users, data-health check), phone/tablet layouts, touch pan + zoom buttons.
+- **Reconciliation**: `npm run reconcile` / `GET /api/admin/reconcile`.
+- Walkthrough script: `docs/demo-notes.md` (Review 3 section).
+
